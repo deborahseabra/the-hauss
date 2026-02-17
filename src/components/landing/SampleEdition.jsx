@@ -269,13 +269,13 @@ export default function SampleEdition() {
                   backgroundColor: "rgba(247,247,247,0.6)",
                 }}>
                   <div style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.ink, marginBottom: 6 }}>
-                    Editor's Note is a Pro feature
+                    Editor's Note is an Editor feature
                   </div>
                   <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, color: C.accent, textDecoration: "none" }}
                     onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
                     onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
                   >
-                    Unlock with Pro →
+                    Unlock with Editor →
                   </a>
                 </div>
               </div>

@@ -64,12 +64,12 @@ export default function ReflectionsShowcase() {
             onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
             onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
           >
-            Unlock Reflections with Pro →
+            Unlock Reflections with Editor →
           </a>
           <div style={{
             fontFamily: F.sans, fontSize: 11, color: C.inkFaint, marginTop: 6,
           }}>
-            Free plan includes weekly reflections. Pro unlocks your full story.
+            Reader plan includes weekly reflections. Editor unlocks your full story.
           </div>
         </div>
       </div>

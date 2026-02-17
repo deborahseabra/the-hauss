@@ -782,3 +782,23 @@ export async function createAttachments(entryId, userId, attachments) {
   if (error) throw error;
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Admin API — Edge Function calls (requires admin role)
+// ---------------------------------------------------------------------------
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+
+export async function adminApi(session, action, params = {}) {
+  const res = await fetch(`${supabaseUrl}/functions/v1/admin-api`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ action, ...params }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Admin API error");
+  return json;
+}

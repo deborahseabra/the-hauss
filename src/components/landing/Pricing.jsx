@@ -2,42 +2,59 @@ import { useState } from "react";
 import { F, C } from "./theme";
 import useInView from "./useInView";
 
-const FREE_FEATURES = [
+const READER_FEATURES = [
   { text: "Unlimited entries", included: true },
   { text: "Dispatches section", included: true },
   { text: "Mood tracking", included: true },
-  { text: "Weekly Edition (basic)", included: true },
+  { text: "Weekly Edition (current week only)", included: true },
   { text: "Weekly Reflections", included: true },
-  { text: "Hauss Editor", included: false },
+  { text: "Share edition (cover view)", included: true },
   { text: "All sections", included: false },
+  { text: "Hauss Editor", included: false },
+  { text: "Editor's Note", included: false },
+  { text: "Edition archives", included: false },
+  { text: "Full Reflections", included: false },
   { text: "Ask Your Editor", included: false },
+  { text: "Share with full reading", included: false },
   { text: "Dark mode & themes", included: false },
-  { text: "Public entries", included: false },
+  { text: "Telegram integration", included: false },
+  { text: "Export", included: false },
 ];
 
-const PRO_FEATURES = [
-  "Everything in Free",
-  "Unlimited Hauss Editor",
+const EDITOR_FEATURES = [
+  "Everything in Reader",
+  "Unlimited Hauss Editor ✦",
   "3 editorial voices",
   "All 5 sections",
+  "Edition archives (full history)",
   "Full Reflections (all periods)",
   "Ask Your Editor",
   "Weekly Editor's Note",
+  "Share editions with full reading",
   "Dark mode + 4 color themes",
-  "Public entries + profile page",
-  "Telegram bot integration",
+  "Telegram integration",
   "Export (PDF, Markdown)",
+];
+
+const PUBLISHER_FEATURES = [
+  "Everything in Editor",
+  "Custom edition periods",
+  "Custom sections (create your own)",
+  "Public author profile (thehauss.me/you)",
+  "Priority Hauss Editor",
 ];
 
 export default function Pricing() {
   const [yearly, setYearly] = useState(false);
   const [ref, style] = useInView();
-  const price = yearly ? "$7" : "$9";
-  const period = yearly ? "$84/year" : "/month";
+  const editorPrice = yearly ? "$5" : "$7";
+  const editorPeriod = yearly ? "$60/year" : "/month";
+  const publisherPrice = yearly ? "$10" : "$12";
+  const publisherPeriod = yearly ? "$120/year" : "/month";
 
   return (
     <section id="pricing" style={{ padding: "80px 24px" }}>
-      <div ref={ref} style={{ ...style, maxWidth: 780, margin: "0 auto" }}>
+      <div ref={ref} style={{ ...style, maxWidth: 1000, margin: "0 auto" }}>
         {/* Header */}
         <div style={{
           fontFamily: F.sans, fontSize: 10, fontWeight: 600,
@@ -84,20 +101,21 @@ export default function Pricing() {
                 color: yearly ? C.bg : C.inkMuted,
               }}
             >
-              Yearly (save 22%)
+              Yearly (save 20%)
             </button>
           </div>
         </div>
 
         {/* Cards */}
-        <div className="landing-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          {/* FREE */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }} className="landing-pricing-grid">
+          {/* READER */}
           <div style={{ border: `1px solid ${C.rule}`, padding: 32 }}>
-            <h3 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 8px" }}>Free</h3>
+            <h3 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Reader</h3>
+            <div style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 12 }}>Start the habit.</div>
             <div style={{ fontFamily: F.mono, fontSize: 36, fontWeight: 600, color: C.ink }}>$0</div>
             <div style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint, marginBottom: 20 }}>forever</div>
             <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 20 }} />
-            {FREE_FEATURES.map((f, i) => (
+            {READER_FEATURES.map((f, i) => (
               <div key={i} style={{
                 fontFamily: F.sans, fontSize: 13, lineHeight: 2,
                 color: f.included ? C.inkLight : "#ccc",
@@ -115,7 +133,7 @@ export default function Pricing() {
             </a>
           </div>
 
-          {/* PRO */}
+          {/* EDITOR */}
           <div style={{ border: `2px solid ${C.ink}`, padding: 32, position: "relative" }}>
             <div style={{
               position: "absolute", top: -1, right: 24,
@@ -126,21 +144,22 @@ export default function Pricing() {
             }}>
               MOST POPULAR
             </div>
-            <h3 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 8px" }}>Pro</h3>
+            <h3 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Editor</h3>
+            <div style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 12 }}>Know yourself completely.</div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-              <span style={{ fontFamily: F.mono, fontSize: 36, fontWeight: 600, color: C.ink }}>{price}</span>
+              <span style={{ fontFamily: F.mono, fontSize: 36, fontWeight: 600, color: C.ink }}>{editorPrice}</span>
               <span style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint }}>/month</span>
             </div>
-            {yearly && <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint }}>$84/year</div>}
+            {yearly && <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint }}>{editorPeriod}</div>}
             <div style={{ marginBottom: 20 }} />
             <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 20 }} />
-            {PRO_FEATURES.map((f, i) => (
+            {EDITOR_FEATURES.map((f, i) => (
               <div key={i} style={{
                 fontFamily: F.sans, fontSize: 13, lineHeight: 2,
-                color: i === 1 ? C.accent : C.inkLight,
-                fontWeight: i === 1 ? 500 : 400,
+                color: f.includes("✦") ? C.accent : C.inkLight,
+                fontWeight: f.includes("✦") ? 500 : 400,
               }}>
-                ✓ {f}{i === 1 && " ✦"}
+                ✓ {f}
               </div>
             ))}
             <a href="/login" style={{
@@ -158,14 +177,50 @@ export default function Pricing() {
               Start free, upgrade anytime
             </div>
           </div>
-        </div>
 
-        {/* Note */}
-        <div style={{
-          fontFamily: F.sans, fontSize: 12, fontStyle: "italic",
-          color: C.inkFaint, textAlign: "center", marginTop: 32,
-        }}>
-          Premium plan with higher editor limits — coming soon.
+          {/* PUBLISHER */}
+          <div style={{ border: `1px solid #b8860b`, padding: 32, position: "relative" }}>
+            <div style={{
+              position: "absolute", top: -1, right: 24,
+              fontFamily: F.sans, fontSize: 9, fontWeight: 600,
+              textTransform: "uppercase", letterSpacing: 1,
+              backgroundColor: "#b8860b", color: "#fff",
+              padding: "4px 10px",
+            }}>
+              FOR SERIOUS WRITERS
+            </div>
+            <h3 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Publisher</h3>
+            <div style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 12 }}>Your own publication.</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+              <span style={{ fontFamily: F.mono, fontSize: 36, fontWeight: 600, color: C.ink }}>{publisherPrice}</span>
+              <span style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint }}>/month</span>
+            </div>
+            {yearly && <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint }}>{publisherPeriod}</div>}
+            <div style={{ marginBottom: 20 }} />
+            <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 20 }} />
+            {PUBLISHER_FEATURES.map((f, i) => (
+              <div key={i} style={{
+                fontFamily: F.sans, fontSize: 13, lineHeight: 2,
+                color: C.inkLight,
+              }}>
+                ✓ {f}
+              </div>
+            ))}
+            <a href="/login" style={{
+              display: "block", textAlign: "center", marginTop: 24,
+              fontFamily: F.sans, fontSize: 13, fontWeight: 500,
+              color: "#b8860b", border: `1px solid #b8860b`,
+              padding: "14px 32px", textDecoration: "none",
+            }}>
+              Start Writing — It's Free
+            </a>
+            <div style={{
+              fontFamily: F.sans, fontSize: 11, color: C.inkFaint,
+              textAlign: "center", marginTop: 8,
+            }}>
+              Start free, upgrade anytime
+            </div>
+          </div>
         </div>
       </div>
     </section>

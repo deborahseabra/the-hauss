@@ -25,6 +25,7 @@ export default function LandingPage() {
           .landing-social-row { flex-direction: column !important; gap: 8px !important; }
           .landing-social-divider { display: none !important; }
           .landing-footer-grid { grid-template-columns: 1fr 1fr !important; }
+          .landing-pricing-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
       <Navbar />

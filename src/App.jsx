@@ -18,7 +18,9 @@ import {
   updatePrompt,
   uploadAttachment,
   createAttachments,
+  adminApi,
 } from "./lib/api";
+import { hasAccess, ROLE_LABELS, ROLE_BADGE_STYLES } from "./lib/access";
 
 const PALETTES = {
   red: { primary: "#c41e1e", light: "#e85d5d", bg: "#fef5f5", bgDark: "#2a1818" },
@@ -789,7 +791,7 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
 // ============================================================
 // PLATFORM HEADER
 // ============================================================
-function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isMaster }) {
+function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isAdmin }) {
   const [menu, setMenu] = useState(false);
   const menuRef = useRef(null);
 
@@ -819,7 +821,7 @@ function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isMaster }) {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
             New Entry
           </button>
-          {user.plan === "free" && <button style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, backgroundColor: "transparent", border: `1px solid ${C.accent}`, padding: "5px 12px", cursor: "pointer" }}>Upgrade</button>}
+          {user.role === "reader" && !user.isTester && <button style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, backgroundColor: "transparent", border: `1px solid ${C.accent}`, padding: "5px 12px", cursor: "pointer" }}>Upgrade</button>}
           <button onClick={onSettings} style={{ background: "none", border: "none", cursor: "pointer", padding: 6, color: C.inkMuted, display: "flex" }}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           </button>
@@ -830,7 +832,7 @@ function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isMaster }) {
               {["My Publication", "Settings", "Export"].map((item, i) => (
                 <button key={i} onClick={() => { setMenu(false); if (item === "Settings") onSettings(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer" }}>{item}</button>
               ))}
-              {isMaster && (
+              {isAdmin && (
                 <button onClick={() => { setMenu(false); if (onAdmin) onAdmin(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.accent, cursor: "pointer", fontWeight: 500 }}>
                   ✦ Admin
                 </button>
@@ -1826,15 +1828,73 @@ function EditionSwitcher({ C }) {
 }
 
 // ============================================================
-// ADMIN PROMPTS PAGE — Master user only
+// ADMIN PAGE — Tabbed admin panel (Prompts, Users, Dashboard)
 // ============================================================
-function AdminPromptsPage({ C, onClose }) {
+function AdminPage({ C, onClose, session }) {
+  const [tab, setTab] = useState("prompts");
+  const [saveMsg, setSaveMsg] = useState(null);
+
+  const TABS = [
+    { id: "prompts", label: "Prompts" },
+    { id: "users", label: "Users" },
+    { id: "dashboard", label: "Dashboard" },
+  ];
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 2000,
+      backgroundColor: C.bg, display: "flex", flexDirection: "column",
+      animation: "editorSlideIn 0.35s ease",
+    }}>
+      {/* Header */}
+      <div style={{
+        borderBottom: `1px solid ${C.rule}`, padding: "0 32px", height: 56,
+        display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={onClose} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            background: "none", border: "none", cursor: "pointer",
+            fontFamily: F.sans, fontSize: 12, color: C.inkMuted,
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+            Back
+          </button>
+          <div style={{ width: 1, height: 20, backgroundColor: C.rule }} />
+          <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>ADMIN</span>
+          <div style={{ width: 1, height: 20, backgroundColor: C.rule }} />
+          {TABS.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              fontFamily: F.sans, fontSize: 11, fontWeight: tab === t.id ? 600 : 400,
+              color: tab === t.id ? C.ink : C.inkMuted,
+              background: "none", border: "none", cursor: "pointer",
+              padding: "4px 8px",
+              borderBottom: tab === t.id ? `2px solid ${C.ink}` : "2px solid transparent",
+            }}>{t.label}</button>
+          ))}
+        </div>
+        {saveMsg && <span style={{ fontFamily: F.sans, fontSize: 11, color: saveMsg.includes("Error") ? "#c41e1e" : C.accent }}>{saveMsg}</span>}
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflow: "auto", padding: "32px" }}>
+        <div style={{ maxWidth: tab === "dashboard" ? 1000 : 800, margin: "0 auto" }}>
+          {tab === "prompts" && <AdminPromptsTab C={C} setSaveMsg={setSaveMsg} />}
+          {tab === "users" && <AdminUsersTab C={C} session={session} setSaveMsg={setSaveMsg} />}
+          {tab === "dashboard" && <AdminDashboardTab C={C} session={session} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Admin: Prompts Tab ──────────────────────────────────────
+function AdminPromptsTab({ C, setSaveMsg }) {
   const [prompts, setPrompts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState(null);
 
   useEffect(() => {
     fetchPrompts()
@@ -1883,161 +1943,524 @@ function AdminPromptsPage({ C, onClose }) {
   };
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 2000,
-      backgroundColor: C.bg, display: "flex", flexDirection: "column",
-      animation: "editorSlideIn 0.35s ease",
-    }}>
-      {/* Header */}
-      <div style={{
-        borderBottom: `1px solid ${C.rule}`, padding: "0 32px", height: 56,
-        display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={onClose} style={{
-            display: "flex", alignItems: "center", gap: 6,
-            background: "none", border: "none", cursor: "pointer",
-            fontFamily: F.sans, fontSize: 12, color: C.inkMuted,
+    <>
+      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>AI Prompts</h1>
+      <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 32 }}>
+        Manage the system prompts used by the AI Editor. Changes take effect immediately.
+      </p>
+
+      {loading && <LoadingBlock C={C} text="Loading prompts..." />}
+
+      {!loading && prompts.map((prompt) => (
+        <div key={prompt.id} style={{
+          border: `1px solid ${editingId === prompt.id ? C.accent : C.rule}`,
+          marginBottom: 16, transition: "border-color 0.2s",
+        }}>
+          <div style={{
+            padding: "16px 20px",
+            backgroundColor: editingId === prompt.id ? C.accentBg : C.sectionBg,
+            borderBottom: `1px solid ${C.rule}`,
+            display: "flex", justifyContent: "space-between", alignItems: "center",
           }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
-            Back
-          </button>
-          <div style={{ width: 1, height: 20, backgroundColor: C.rule }} />
-          <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>ADMIN</span>
+            <div>
+              <div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 600, color: C.ink }}>{prompt.label}</div>
+              <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginTop: 2 }}>{prompt.description}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{prompt.id}</span>
+              {editingId !== prompt.id ? (
+                <button onClick={() => startEdit(prompt)} style={{
+                  fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                  color: C.bg, backgroundColor: C.ink, border: "none",
+                  padding: "5px 14px", cursor: "pointer",
+                }}>Edit</button>
+              ) : (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={handleSave} disabled={saving} style={{
+                    fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                    color: C.bg, backgroundColor: C.accent, border: "none",
+                    padding: "5px 14px", cursor: saving ? "default" : "pointer",
+                    opacity: saving ? 0.7 : 1,
+                  }}>{saving ? "Saving..." : "Save"}</button>
+                  <button onClick={cancelEdit} style={{
+                    fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+                    background: "none", border: `1px solid ${C.rule}`,
+                    padding: "5px 14px", cursor: "pointer",
+                  }}>Cancel</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ padding: "16px 20px" }}>
+            {editingId === prompt.id ? (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>System Prompt</label>
+                  <textarea
+                    value={editForm.system_prompt}
+                    onChange={(e) => setEditForm({ ...editForm, system_prompt: e.target.value })}
+                    style={{
+                      width: "100%", minHeight: 200, padding: "12px",
+                      fontFamily: F.mono, fontSize: 12, lineHeight: 1.6,
+                      color: C.ink, backgroundColor: C.sectionBg,
+                      border: `1px solid ${C.rule}`, outline: "none", resize: "vertical",
+                    }}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Model</label>
+                    <input value={editForm.model} onChange={(e) => setEditForm({ ...editForm, model: e.target.value })} style={{ width: "100%", padding: "8px 10px", fontFamily: F.mono, fontSize: 12, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Temperature</label>
+                    <input type="number" step="0.1" min="0" max="2" value={editForm.temperature} onChange={(e) => setEditForm({ ...editForm, temperature: e.target.value })} style={{ width: "100%", padding: "8px 10px", fontFamily: F.mono, fontSize: 12, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Max Tokens</label>
+                    <input type="number" step="100" min="100" max="8000" value={editForm.max_tokens} onChange={(e) => setEditForm({ ...editForm, max_tokens: e.target.value })} style={{ width: "100%", padding: "8px 10px", fontFamily: F.mono, fontSize: 12, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <pre style={{
+                  fontFamily: F.mono, fontSize: 11, lineHeight: 1.6,
+                  color: C.inkLight, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  maxHeight: 120, overflow: "hidden", marginBottom: 10,
+                }}>{prompt.system_prompt}</pre>
+                <div style={{ display: "flex", gap: 16 }}>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>model: {prompt.model}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>temp: {prompt.temperature}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>max_tokens: {prompt.max_tokens}</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-        {saveMsg && <span style={{ fontFamily: F.sans, fontSize: 11, color: saveMsg.includes("Error") ? "#c41e1e" : C.accent }}>{saveMsg}</span>}
+      ))}
+    </>
+  );
+}
+
+// ── Admin: Users Tab ────────────────────────────────────────
+function AdminUsersTab({ C, session, setSaveMsg }) {
+  const [users, setUsers] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [testerFilter, setTesterFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState("desc");
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [addForm, setAddForm] = useState({ name: "", email: "", role: "reader", is_tester: false });
+  const [adding, setAdding] = useState(false);
+  const perPage = 20;
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await adminApi(session, "list_users", {
+        page, per_page: perPage, search: search || undefined,
+        role_filter: roleFilter, tester_filter: testerFilter,
+        sort_by: sortBy, sort_dir: sortDir,
+      });
+      setUsers(result.users || []);
+      setTotal(result.total || 0);
+    } catch (err) {
+      console.error("Failed to load users:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [session, page, search, roleFilter, testerFilter, sortBy, sortDir]);
+
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  const handleRoleChange = async (userId, newRole) => {
+    try {
+      await adminApi(session, "update_role", { user_id: userId, role: newRole });
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, role: newRole } : u));
+      setSaveMsg("Role updated.");
+      setTimeout(() => setSaveMsg(null), 2000);
+    } catch (err) {
+      console.error("Failed to update role:", err);
+      setSaveMsg("Error updating role.");
+      setTimeout(() => setSaveMsg(null), 3000);
+    }
+  };
+
+  const handleTesterToggle = async (userId, currentVal) => {
+    const newVal = !currentVal;
+    try {
+      await adminApi(session, "toggle_tester", { user_id: userId, is_tester: newVal });
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, is_tester: newVal } : u));
+      setSaveMsg(newVal ? "Tester enabled." : "Tester disabled.");
+      setTimeout(() => setSaveMsg(null), 2000);
+    } catch (err) {
+      console.error("Failed to toggle tester:", err);
+      setSaveMsg("Error toggling tester.");
+      setTimeout(() => setSaveMsg(null), 3000);
+    }
+  };
+
+  const handleAddUser = async () => {
+    setAdding(true);
+    try {
+      await adminApi(session, "create_user", addForm);
+      setSaveMsg("User created.");
+      setTimeout(() => setSaveMsg(null), 3000);
+      setShowAddUser(false);
+      setAddForm({ name: "", email: "", role: "reader", is_tester: false });
+      loadUsers();
+    } catch (err) {
+      console.error("Failed to create user:", err);
+      setSaveMsg("Error: " + err.message);
+      setTimeout(() => setSaveMsg(null), 4000);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const totalPages = Math.ceil(total / perPage);
+
+  const inputStyle = {
+    padding: "7px 10px", fontFamily: F.sans, fontSize: 12, color: C.ink,
+    backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
+  };
+  const selectStyle = { ...inputStyle, cursor: "pointer" };
+
+  const RoleBadge = ({ role, isTester }) => {
+    const s = ROLE_BADGE_STYLES[role] || ROLE_BADGE_STYLES.reader;
+    return (
+      <span style={{
+        display: "inline-block", padding: "2px 8px", fontFamily: F.sans, fontSize: 10,
+        fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px",
+        ...s,
+        borderStyle: isTester ? "dashed" : (s.border ? undefined : "solid"),
+        borderWidth: isTester && !s.border ? 1 : undefined,
+        borderColor: isTester && !s.border ? s.backgroundColor : undefined,
+      }}>
+        {ROLE_LABELS[role] || role}
+      </span>
+    );
+  };
+
+  return (
+    <>
+      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Users</h1>
+      <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 24 }}>
+        Manage user accounts, roles, and tester flags.
+      </p>
+
+      {/* Toolbar */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <input
+          placeholder="Search name or email..."
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          style={{ ...inputStyle, flex: 1, minWidth: 200 }}
+        />
+        <select value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }} style={selectStyle}>
+          <option value="all">All Roles</option>
+          <option value="admin">Admin</option>
+          <option value="reader">Reader</option>
+          <option value="editor">Editor</option>
+          <option value="publisher">Publisher</option>
+        </select>
+        <select value={testerFilter} onChange={(e) => { setTesterFilter(e.target.value); setPage(1); }} style={selectStyle}>
+          <option value="all">All Users</option>
+          <option value="testers">Testers Only</option>
+        </select>
+        <button onClick={() => setShowAddUser(true)} style={{
+          fontFamily: F.sans, fontSize: 11, fontWeight: 600,
+          color: C.bg, backgroundColor: C.ink, border: "none",
+          padding: "8px 16px", cursor: "pointer",
+        }}>+ Add User</button>
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflow: "auto", padding: "32px" }}>
-        <div style={{ maxWidth: 800, margin: "0 auto" }}>
-          <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>AI Prompts</h1>
-          <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 32 }}>
-            Manage the system prompts used by the AI Editor. Changes take effect immediately.
-          </p>
+      {/* Add User Modal */}
+      {showAddUser && (
+        <div style={{
+          border: `1px solid ${C.accent}`, padding: 20, marginBottom: 20,
+          backgroundColor: C.sectionBg,
+        }}>
+          <div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 600, color: C.ink, marginBottom: 12 }}>Create New User</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <input placeholder="Name" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} style={inputStyle} />
+            <input placeholder="Email" type="email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} style={inputStyle} />
+            <select value={addForm.role} onChange={(e) => setAddForm({ ...addForm, role: e.target.value })} style={selectStyle}>
+              <option value="reader">Reader</option>
+              <option value="editor">Editor</option>
+              <option value="publisher">Publisher</option>
+              <option value="admin">Admin</option>
+            </select>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: F.sans, fontSize: 12, color: C.ink, cursor: "pointer" }}>
+              <input type="checkbox" checked={addForm.is_tester} onChange={(e) => setAddForm({ ...addForm, is_tester: e.target.checked })} />
+              Tester
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleAddUser} disabled={adding || !addForm.name || !addForm.email} style={{
+              fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+              color: C.bg, backgroundColor: C.accent, border: "none",
+              padding: "6px 16px", cursor: adding ? "default" : "pointer",
+              opacity: adding ? 0.7 : 1,
+            }}>{adding ? "Creating..." : "Create User"}</button>
+            <button onClick={() => setShowAddUser(false)} style={{
+              fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+              background: "none", border: `1px solid ${C.rule}`,
+              padding: "6px 16px", cursor: "pointer",
+            }}>Cancel</button>
+          </div>
+        </div>
+      )}
 
-          {loading && <LoadingBlock C={C} text="Loading prompts..." />}
-
-          {!loading && prompts.map((prompt) => (
-            <div key={prompt.id} style={{
-              border: `1px solid ${editingId === prompt.id ? C.accent : C.rule}`,
-              marginBottom: 16, transition: "border-color 0.2s",
-            }}>
-              {/* Prompt header */}
-              <div style={{
-                padding: "16px 20px",
-                backgroundColor: editingId === prompt.id ? C.accentBg : C.sectionBg,
-                borderBottom: `1px solid ${C.rule}`,
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-              }}>
-                <div>
-                  <div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 600, color: C.ink }}>{prompt.label}</div>
-                  <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginTop: 2 }}>{prompt.description}</div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{prompt.id}</span>
-                  {editingId !== prompt.id ? (
-                    <button onClick={() => startEdit(prompt)} style={{
-                      fontFamily: F.sans, fontSize: 11, fontWeight: 500,
-                      color: C.bg, backgroundColor: C.ink, border: "none",
-                      padding: "5px 14px", cursor: "pointer",
-                    }}>Edit</button>
-                  ) : (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={handleSave} disabled={saving} style={{
-                        fontFamily: F.sans, fontSize: 11, fontWeight: 500,
-                        color: C.bg, backgroundColor: C.accent, border: "none",
-                        padding: "5px 14px", cursor: saving ? "default" : "pointer",
-                        opacity: saving ? 0.7 : 1,
-                      }}>{saving ? "Saving..." : "Save"}</button>
-                      <button onClick={cancelEdit} style={{
-                        fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
-                        background: "none", border: `1px solid ${C.rule}`,
-                        padding: "5px 14px", cursor: "pointer",
-                      }}>Cancel</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Prompt body */}
-              <div style={{ padding: "16px 20px" }}>
-                {editingId === prompt.id ? (
-                  <>
-                    <div style={{ marginBottom: 14 }}>
-                      <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>System Prompt</label>
-                      <textarea
-                        value={editForm.system_prompt}
-                        onChange={(e) => setEditForm({ ...editForm, system_prompt: e.target.value })}
-                        style={{
-                          width: "100%", minHeight: 200, padding: "12px",
-                          fontFamily: F.mono, fontSize: 12, lineHeight: 1.6,
-                          color: C.ink, backgroundColor: C.sectionBg,
-                          border: `1px solid ${C.rule}`, outline: "none", resize: "vertical",
-                        }}
-                      />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                      <div>
-                        <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Model</label>
-                        <input
-                          value={editForm.model}
-                          onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
-                          style={{
-                            width: "100%", padding: "8px 10px",
-                            fontFamily: F.mono, fontSize: 12, color: C.ink,
-                            backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Temperature</label>
-                        <input
-                          type="number" step="0.1" min="0" max="2"
-                          value={editForm.temperature}
-                          onChange={(e) => setEditForm({ ...editForm, temperature: e.target.value })}
-                          style={{
-                            width: "100%", padding: "8px 10px",
-                            fontFamily: F.mono, fontSize: 12, color: C.ink,
-                            backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Max Tokens</label>
-                        <input
-                          type="number" step="100" min="100" max="8000"
-                          value={editForm.max_tokens}
-                          onChange={(e) => setEditForm({ ...editForm, max_tokens: e.target.value })}
-                          style={{
-                            width: "100%", padding: "8px 10px",
-                            fontFamily: F.mono, fontSize: 12, color: C.ink,
-                            backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <pre style={{
-                      fontFamily: F.mono, fontSize: 11, lineHeight: 1.6,
-                      color: C.inkLight, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                      maxHeight: 120, overflow: "hidden", marginBottom: 10,
-                    }}>{prompt.system_prompt}</pre>
-                    <div style={{ display: "flex", gap: 16 }}>
-                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>model: {prompt.model}</span>
-                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>temp: {prompt.temperature}</span>
-                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>max_tokens: {prompt.max_tokens}</span>
-                    </div>
-                  </>
+      {/* Users Table */}
+      {loading ? <LoadingBlock C={C} text="Loading users..." /> : (
+        <>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: F.sans, fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${C.ink}` }}>
+                  {[
+                    { key: "name", label: "Name" },
+                    { key: "email", label: "Email" },
+                    { key: "role", label: "Role" },
+                    { key: null, label: "Tester" },
+                    { key: null, label: "Entries" },
+                    { key: "created_at", label: "Joined" },
+                  ].map((col) => (
+                    <th key={col.label} onClick={col.key ? () => {
+                      if (sortBy === col.key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+                      else { setSortBy(col.key); setSortDir("asc"); }
+                    } : undefined} style={{
+                      textAlign: "left", padding: "8px 10px", fontWeight: 600,
+                      fontSize: 10, textTransform: "uppercase", letterSpacing: "1px",
+                      color: C.inkMuted, cursor: col.key ? "pointer" : "default",
+                      whiteSpace: "nowrap",
+                    }}>
+                      {col.label}
+                      {col.key && sortBy === col.key && (sortDir === "asc" ? " ↑" : " ↓")}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id} style={{ borderBottom: `1px solid ${C.rule}` }}>
+                    <td style={{ padding: "10px 10px", color: C.ink, fontWeight: 500 }}>{u.name}</td>
+                    <td style={{ padding: "10px 10px", color: C.inkLight, fontSize: 11 }}>{u.email}</td>
+                    <td style={{ padding: "10px 10px" }}>
+                      <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)} style={{
+                        fontFamily: F.sans, fontSize: 11, padding: "3px 6px",
+                        color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`,
+                        cursor: "pointer", outline: "none",
+                      }}>
+                        <option value="reader">Reader</option>
+                        <option value="editor">Editor</option>
+                        <option value="publisher">Publisher</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </td>
+                    <td style={{ padding: "10px 10px", textAlign: "center" }}>
+                      <button onClick={() => handleTesterToggle(u.id, u.is_tester)} style={{
+                        width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer",
+                        backgroundColor: u.is_tester ? C.accent : C.rule,
+                        position: "relative", transition: "background-color 0.2s",
+                      }}>
+                        <span style={{
+                          position: "absolute", top: 2, left: u.is_tester ? 18 : 2,
+                          width: 16, height: 16, borderRadius: 8,
+                          backgroundColor: "#fff", transition: "left 0.2s",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                        }} />
+                      </button>
+                    </td>
+                    <td style={{ padding: "10px 10px", color: C.inkLight, textAlign: "center", fontFamily: F.mono, fontSize: 11 }}>{u.entry_count}</td>
+                    <td style={{ padding: "10px 10px", color: C.inkMuted, fontSize: 11, whiteSpace: "nowrap" }}>
+                      {new Date(u.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                  </tr>
+                ))}
+                {users.length === 0 && (
+                  <tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: C.inkMuted, fontStyle: "italic" }}>No users found.</td></tr>
                 )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 20 }}>
+              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} style={{
+                fontFamily: F.sans, fontSize: 11, padding: "6px 14px",
+                background: "none", border: `1px solid ${C.rule}`,
+                color: page <= 1 ? C.inkFaint : C.ink, cursor: page <= 1 ? "default" : "pointer",
+              }}>← Prev</button>
+              <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, padding: "6px 10px" }}>
+                Page {page} of {totalPages} ({total} users)
+              </span>
+              <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} style={{
+                fontFamily: F.sans, fontSize: 11, padding: "6px 14px",
+                background: "none", border: `1px solid ${C.rule}`,
+                color: page >= totalPages ? C.inkFaint : C.ink, cursor: page >= totalPages ? "default" : "pointer",
+              }}>Next →</button>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+// ── Admin: Dashboard Tab ────────────────────────────────────
+function AdminDashboardTab({ C, session }) {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminApi(session, "dashboard_stats")
+      .then(setStats)
+      .catch((err) => console.error("Failed to load dashboard:", err))
+      .finally(() => setLoading(false));
+  }, [session]);
+
+  if (loading) return <LoadingBlock C={C} text="Loading dashboard..." />;
+  if (!stats) return <p style={{ fontFamily: F.body, color: C.inkMuted }}>Failed to load dashboard data.</p>;
+
+  const statCardStyle = {
+    padding: "24px 20px", backgroundColor: C.sectionBg,
+    border: `1px solid ${C.rule}`, textAlign: "center",
+  };
+  const bigNum = { fontFamily: F.display, fontSize: 36, fontWeight: 700, color: C.ink, lineHeight: 1.2 };
+  const statLabel = { fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", marginTop: 6 };
+
+  // Build 30-day chart data
+  const today = new Date();
+  const days30 = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    days30.push(d.toISOString().substring(0, 10));
+  }
+
+  const MiniBarChart = ({ data, label, color }) => {
+    const values = days30.map((d) => data[d] || 0);
+    const max = Math.max(...values, 1);
+    return (
+      <div style={{ border: `1px solid ${C.rule}`, padding: "16px 20px", backgroundColor: C.sectionBg }}>
+        <div style={{ ...statLabel, marginTop: 0, marginBottom: 12 }}>{label}</div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 80 }}>
+          {values.map((v, i) => (
+            <div key={i} title={`${days30[i]}: ${v}`} style={{
+              flex: 1, height: `${(v / max) * 100}%`, minHeight: v > 0 ? 3 : 1,
+              backgroundColor: v > 0 ? (color || C.accent) : C.rule, transition: "height 0.3s",
+            }} />
+          ))}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+          <span style={{ fontFamily: F.mono, fontSize: 9, color: C.inkFaint }}>30d ago</span>
+          <span style={{ fontFamily: F.mono, fontSize: 9, color: C.inkFaint }}>Today</span>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Dashboard</h1>
+      <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 24 }}>
+        Platform metrics at a glance.
+      </p>
+
+      {/* Row 1: Big numbers */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+        <div style={statCardStyle}>
+          <div style={bigNum}>{stats.total_users}</div>
+          <div style={statLabel}>Total Users</div>
+          <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 4 }}>
+            {Object.entries(stats.by_role || {}).map(([r, c]) => `${c} ${r}`).join(" · ")}
+          </div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={bigNum}>{stats.active_this_week}</div>
+          <div style={statLabel}>Active This Week</div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={bigNum}>{stats.entries_this_week}</div>
+          <div style={statLabel}>Entries This Week</div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={bigNum}>{stats.total_entries}</div>
+          <div style={statLabel}>Total Entries</div>
+        </div>
+      </div>
+
+      {/* Row 2: Charts */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+        <MiniBarChart data={stats.signups_by_day || {}} label="Signups (Last 30 Days)" color={C.ink} />
+        <MiniBarChart data={stats.entries_by_day || {}} label="Entries (Last 30 Days)" color={C.accent} />
+      </div>
+
+      {/* Row 3: Lists */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {/* Top Writers */}
+        <div style={{ border: `1px solid ${C.rule}`, padding: "16px 20px", backgroundColor: C.sectionBg }}>
+          <div style={{ ...statLabel, marginTop: 0, marginBottom: 12 }}>Top 10 Writers</div>
+          {(stats.top_writers || []).map((w, i) => (
+            <div key={i} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "6px 0", borderBottom: i < (stats.top_writers || []).length - 1 ? `1px solid ${C.rule}` : "none",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, width: 16 }}>{i + 1}.</span>
+                <span style={{ fontFamily: F.sans, fontSize: 12, color: C.ink, fontWeight: 500 }}>{w.name}</span>
+                <span style={{
+                  display: "inline-block", padding: "1px 6px", fontFamily: F.sans, fontSize: 9,
+                  fontWeight: 600, textTransform: "uppercase",
+                  ...(ROLE_BADGE_STYLES[w.role] || ROLE_BADGE_STYLES.reader),
+                }}>{w.role}</span>
+              </div>
+              <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkMuted }}>{w.entries} entries</span>
+            </div>
+          ))}
+          {(!stats.top_writers || stats.top_writers.length === 0) && (
+            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, fontStyle: "italic" }}>No data yet.</div>
+          )}
+        </div>
+
+        {/* Recent Signups */}
+        <div style={{ border: `1px solid ${C.rule}`, padding: "16px 20px", backgroundColor: C.sectionBg }}>
+          <div style={{ ...statLabel, marginTop: 0, marginBottom: 12 }}>Recent Signups</div>
+          {(stats.recent_signups || []).map((s, i) => (
+            <div key={i} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "6px 0", borderBottom: i < (stats.recent_signups || []).length - 1 ? `1px solid ${C.rule}` : "none",
+            }}>
+              <div>
+                <div style={{ fontFamily: F.sans, fontSize: 12, color: C.ink, fontWeight: 500 }}>{s.name}</div>
+                <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{s.email}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <span style={{
+                  display: "inline-block", padding: "1px 6px", fontFamily: F.sans, fontSize: 9,
+                  fontWeight: 600, textTransform: "uppercase",
+                  ...(ROLE_BADGE_STYLES[s.role] || ROLE_BADGE_STYLES.reader),
+                }}>{s.role}</span>
+                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 2 }}>
+                  {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </div>
               </div>
             </div>
           ))}
+          {(!stats.recent_signups || stats.recent_signups.length === 0) && (
+            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, fontStyle: "italic" }}>No signups yet.</div>
+          )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -2477,7 +2900,8 @@ export default function App() {
   const user = {
     name: profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "User",
     email: profile?.email || authUser?.email || "",
-    plan: profile?.plan || "free",
+    role: profile?.role || "reader",
+    isTester: profile?.is_tester || false,
     avatar: (profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "U")[0].toUpperCase(),
   };
 
@@ -2540,7 +2964,7 @@ export default function App() {
         ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: ${C.rule}; border-radius: 3px; }
       `}</style>
 
-      <PlatformHeader user={user} C={C} onSettings={() => setSettingsOpen(true)} onEditor={() => setEditorOpen(true)} onAdmin={() => setAdminOpen(true)} isMaster={profile?.is_master} />
+      <PlatformHeader user={user} C={C} onSettings={() => setSettingsOpen(true)} onEditor={() => setEditorOpen(true)} onAdmin={() => setAdminOpen(true)} isAdmin={user.role === "admin"} />
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 24px" }}>
 
@@ -2718,7 +3142,7 @@ export default function App() {
 
       {editorOpen && <EditorView onClose={() => setEditorOpen(false)} onPublished={handleRefresh} C={C} userId={userId} session={session} />}
       <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} pubName={pubName} setPubName={setPubName} motto={motto} setMotto={setMotto} userId={userId} />
-      {adminOpen && <AdminPromptsPage C={C} onClose={() => setAdminOpen(false)} />}
+      {adminOpen && <AdminPage C={C} onClose={() => setAdminOpen(false)} session={session} />}
       {articleEntry && (
         <ArticleView
           entry={articleEntry}
@@ -2727,7 +3151,7 @@ export default function App() {
           onPrev={articleIndex > 0 ? goArticlePrev : null}
           onNext={articleIndex < articleList.length - 1 ? goArticleNext : null}
           C={C}
-          isProUser={user.plan === "pro" || user.plan === "team"}
+          isProUser={hasAccess(user.role, user.isTester, "editor")}
           siblingEntries={articleList.filter((_, i) => i !== articleIndex).slice(0, 3)}
           onNavigateToEntry={(sib) => {
             const idx = articleList.findIndex((e) => e.id === sib.id);

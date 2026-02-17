@@ -17,7 +17,7 @@ function ProBadge() {
       padding: "2px 8px", marginLeft: 8,
       display: "inline-block", verticalAlign: "middle",
     }}>
-      ✦ Pro
+      ✦ Editor
     </span>
   );
 }
@@ -90,7 +90,7 @@ export default function FeatureShowcase() {
             />
             <MainFeature
               title="Weekly Editions"
-              body="Every week, your entries are compiled into a beautiful edition. The Hauss Editor selects your top story, organizes by section, and generates the layout. Pro users get a full Editor's Note — The Hauss Editor's reflection on your week."
+              body="Every week, your entries are compiled into a beautiful edition. The Hauss Editor selects your top story, organizes by section, and generates the layout. Editor and Publisher users get a full Editor's Note — The Hauss Editor's reflection on your week."
               isLast
             />
           </div>
