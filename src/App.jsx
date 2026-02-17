@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import AuthPage from "./AuthPage";
+import LandingPage from "./LandingPage";
 import {
   fetchProfile,
   fetchJournal,
@@ -660,25 +661,32 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
   const [ln, setLn] = useState(pubName);
   const [lm, setLm] = useState(motto);
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
   useEffect(() => { setLn(pubName); setLm(motto); }, [pubName, motto]);
   if (!isOpen) return null;
 
   const save = async () => {
     setSaving(true);
+    setToast(null);
     try {
-      setPubName(ln);
-      setMotto(lm);
       await updateProfile(userId, {
         publication_name: ln,
         motto: lm,
         theme_mode: mode,
         theme_accent: accent,
       });
+      setPubName(ln);
+      setMotto(lm);
+      setToast("success");
+      setTimeout(() => {
+        setToast(null);
+        onClose();
+      }, 1200);
     } catch (err) {
       console.error("Failed to save settings:", err);
+      setToast("error");
     } finally {
       setSaving(false);
-      onClose();
     }
   };
 
@@ -750,7 +758,28 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
             <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Motto</div>
             <input value={lm} onChange={(e) => setLm(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
           </div>
-          <button onClick={save} disabled={saving} style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>{saving ? "Saving..." : "Save Changes"}</button>
+          {toast === "success" && (
+            <div style={{
+              padding: "10px 14px", marginBottom: 12,
+              backgroundColor: "#f0faf0", border: "1px solid #c3e6c3",
+              fontFamily: F.sans, fontSize: 12, color: "#2d6a2d",
+              display: "flex", alignItems: "center", gap: 8,
+              animation: "fadeIn 0.2s ease",
+            }}>
+              <span>✓</span> Changes saved successfully.
+            </div>
+          )}
+          {toast === "error" && (
+            <div style={{
+              padding: "10px 14px", marginBottom: 12,
+              backgroundColor: "#fef5f5", border: "1px solid #f5d5d5",
+              fontFamily: F.sans, fontSize: 12, color: "#c41e1e",
+              animation: "fadeIn 0.2s ease",
+            }}>
+              Failed to save. Please try again.
+            </div>
+          )}
+          <button onClick={save} disabled={saving || toast === "success"} style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: saving || toast === "success" ? "default" : "pointer", opacity: saving || toast === "success" ? 0.7 : 1 }}>{saving ? "Saving..." : toast === "success" ? "Saved!" : "Save Changes"}</button>
         </div>
       </div>
     </div>
@@ -2487,9 +2516,11 @@ export default function App() {
     );
   }
 
-  // Not logged in — show auth page
+  // Not logged in — show landing page or auth page
   if (!session) {
-    return <AuthPage />;
+    const isLoginPath = window.location.pathname === "/login" || window.location.pathname === "/signup";
+    if (isLoginPath) return <AuthPage />;
+    return <LandingPage />;
   }
 
   return (
