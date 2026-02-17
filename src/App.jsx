@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { supabase } from "./supabaseClient";
+import AuthPage from "./AuthPage";
 
 const PALETTES = {
   red: { primary: "#c41e1e", light: "#e85d5d", bg: "#fef5f5", bgDark: "#2a1818" },
@@ -583,6 +585,22 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
 // ============================================================
 function PlatformHeader({ user, C, onSettings, onEditor }) {
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menu]);
+
+  const handleSignOut = async () => {
+    setMenu(false);
+    await supabase.auth.signOut();
+  };
+
   return (
     <div style={{ backgroundColor: C.platformBg, borderBottom: `1px solid ${C.platformBorder}`, padding: "0 24px", position: "sticky", top: 0, zIndex: 900 }}>
       <div style={{ maxWidth: 980, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", height: 48 }}>
@@ -599,13 +617,15 @@ function PlatformHeader({ user, C, onSettings, onEditor }) {
           <button onClick={onSettings} style={{ background: "none", border: "none", cursor: "pointer", padding: 6, color: C.inkMuted, display: "flex" }}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           </button>
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative" }} ref={menuRef}>
             <button onClick={() => setMenu(!menu)} style={{ width: 30, height: 30, borderRadius: "50%", backgroundColor: C.accent, color: "#fff", border: "none", cursor: "pointer", fontFamily: F.sans, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center" }}>{user.avatar}</button>
             {menu && <div style={{ position: "absolute", top: 38, right: 0, backgroundColor: C.surface, border: `1px solid ${C.rule}`, boxShadow: "0 8px 30px rgba(0,0,0,0.12)", minWidth: 200, zIndex: 999, animation: "fadeIn 0.15s ease" }}>
-              <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.rule}` }}><div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.ink }}>{MOCK.user.name}</div><div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{MOCK.user.email}</div></div>
-              {["My Publication", "Settings", "Export", "Sign Out"].map((item, i) => (
-                <button key={i} onClick={() => { setMenu(false); if (item === "Settings") onSettings(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: i === 3 ? C.inkMuted : C.inkLight, cursor: "pointer" }}>{item}</button>
+              <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.rule}` }}><div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.ink }}>{user.name}</div><div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{user.email}</div></div>
+              {["My Publication", "Settings", "Export"].map((item, i) => (
+                <button key={i} onClick={() => { setMenu(false); if (item === "Settings") onSettings(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer" }}>{item}</button>
               ))}
+              <div style={{ height: 1, backgroundColor: C.rule }} />
+              <button onClick={handleSignOut} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkMuted, cursor: "pointer" }}>Sign Out</button>
             </div>}
           </div>
         </div>
@@ -618,33 +638,235 @@ function PlatformHeader({ user, C, onSettings, onEditor }) {
 // JOURNAL VIEW — Personal, intimate, day-by-day
 // ============================================================
 function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
+  const [periodKey, setPeriodKey] = useState("thisWeek");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const pickerRef = useRef(null);
+
+  useEffect(() => {
+    const outside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
+    if (pickerOpen) document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [pickerOpen]);
+
+  const journalPeriods = {
+    thisWeek: {
+      title: "This Week",
+      sub: "Feb 9 – 15, 2026",
+      journal: data.journal,
+    },
+    lastWeek: {
+      title: "Last Week",
+      sub: "Feb 2 – 8, 2026",
+      journal: [
+        { date: "Sunday, February 8", entries: [
+          { time: "10:30 PM", text: "Finished the book Marina lent me. Every ending feels like a small death — the world you lived in for 300 pages just stops existing. I sat with the last page open for a while, not ready to close it.", mood: "🌙", section: "Review", isPublic: false, source: "app" },
+        ]},
+        { date: "Saturday, February 7", entries: [
+          { time: "3:15 PM", text: "Farmers market on Rua dos Pinheiros. Bought too many tomatoes again. There's something about holding produce that makes me optimistic — all that potential energy, waiting to become dinner or disaster.", mood: "☀️", section: "Dispatch", isPublic: false, source: "telegram" },
+        ]},
+        { date: "Friday, February 6", entries: [
+          { time: "11:45 PM", text: "The presentation went well. Better than well — it landed. I could feel the room shift when I showed the retention data. Three months of work compressed into twelve slides. Afterward, my manager said 'this changes things.' I'm still not sure what she meant.", mood: "⚡", section: "Personal Essay", isPublic: true, source: "app" },
+        ]},
+        { date: "Wednesday, February 4", entries: [
+          { time: "7:00 PM", text: "Rain all day. Worked from the couch with the window cracked open. The sound of São Paulo rain is different from any other rain — it's theatrical, unapologetic. Everything smelled like wet concrete and jasmine.", mood: "🌧", section: "Dispatch", isPublic: false, source: "telegram" },
+        ]},
+        { date: "Monday, February 2", entries: [
+          { time: "8:00 AM", text: "New month energy. Made a list of everything I want to do in February. It's ambitious — probably too ambitious. But there's something about writing it down that makes it feel possible. First item: stop postponing the hard conversation.", mood: "🌤", section: "Letter to Self", isPublic: false, source: "app" },
+        ]},
+      ],
+    },
+    thisMonth: {
+      title: "February",
+      sub: "Feb 1 – 15, 2026",
+      journal: [
+        ...data.journal,
+        { date: "Sunday, February 8", entries: [
+          { time: "10:30 PM", text: "Finished the book Marina lent me. Every ending feels like a small death — the world you lived in for 300 pages just stops existing. I sat with the last page open for a while, not ready to close it.", mood: "🌙", section: "Review", isPublic: false, source: "app" },
+        ]},
+        { date: "Saturday, February 7", entries: [
+          { time: "3:15 PM", text: "Farmers market on Rua dos Pinheiros. Bought too many tomatoes again. There's something about holding produce that makes me optimistic — all that potential energy, waiting to become dinner or disaster.", mood: "☀️", section: "Dispatch", isPublic: false, source: "telegram" },
+        ]},
+        { date: "Friday, February 6", entries: [
+          { time: "11:45 PM", text: "The presentation went well. Better than well — it landed. I could feel the room shift when I showed the retention data.", mood: "⚡", section: "Personal Essay", isPublic: true, source: "app" },
+        ]},
+        { date: "Wednesday, February 4", entries: [
+          { time: "7:00 PM", text: "Rain all day. Worked from the couch with the window cracked open. The sound of São Paulo rain is different from any other rain — it's theatrical, unapologetic.", mood: "🌧", section: "Dispatch", isPublic: false, source: "telegram" },
+        ]},
+        { date: "Monday, February 2", entries: [
+          { time: "8:00 AM", text: "New month energy. Made a list of everything I want to do in February. It's ambitious — probably too ambitious. But there's something about writing it down that makes it feel possible.", mood: "🌤", section: "Letter to Self", isPublic: false, source: "app" },
+        ]},
+      ],
+    },
+    last30: {
+      title: "Last 30 Days",
+      sub: "Jan 17 – Feb 15, 2026",
+      journal: [
+        ...data.journal,
+        { date: "Sunday, February 8", entries: [
+          { time: "10:30 PM", text: "Finished the book Marina lent me. Every ending feels like a small death — the world you lived in for 300 pages just stops existing.", mood: "🌙", section: "Review", isPublic: false, source: "app" },
+        ]},
+        { date: "Wednesday, February 4", entries: [
+          { time: "7:00 PM", text: "Rain all day. Worked from the couch with the window cracked open. The sound of São Paulo rain is different from any other rain — it's theatrical, unapologetic.", mood: "🌧", section: "Dispatch", isPublic: false, source: "telegram" },
+        ]},
+        { date: "Sunday, January 26", entries: [
+          { time: "9:00 PM", text: "January is almost over and I still haven't done the thing I promised myself I'd do. But maybe the promise was the wrong shape. Maybe it needs to be smaller, more specific. Not 'change your life' but 'send one email.'", mood: "🌙", section: "Letter to Self", isPublic: false, source: "app" },
+        ]},
+        { date: "Tuesday, January 21", entries: [
+          { time: "6:30 PM", text: "Cooked risotto for the first time. Forty-five minutes of stirring. It was meditative in a way I didn't expect — the repetition, the patience, the slow transformation. The risotto was fine. The process was the point.", mood: "🌤", section: "Dispatch", isPublic: false, source: "app" },
+        ]},
+        { date: "Friday, January 17", entries: [
+          { time: "11:15 PM", text: "Started rereading my entries from December. It's strange to meet yourself from two months ago. She was tired in a way I'd already forgotten. I want to write her a letter, but she wouldn't believe what's coming.", mood: "🌙", section: "Personal Essay", isPublic: true, source: "app" },
+        ]},
+      ],
+    },
+  };
+
+  const applyCustom = () => {
+    if (!customFrom || !customTo) return;
+    setPeriodKey("custom");
+    setPickerOpen(false);
+  };
+
+  const activePeriod = periodKey === "custom" ? {
+    title: "Custom Period",
+    sub: (() => {
+      if (!customFrom || !customTo) return "";
+      const f = new Date(customFrom + "T12:00:00");
+      const t = new Date(customTo + "T12:00:00");
+      const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      return `${mo[f.getMonth()]} ${f.getDate()} – ${mo[t.getMonth()]} ${t.getDate()}, ${t.getFullYear()}`;
+    })(),
+    journal: journalPeriods.thisMonth.journal,
+  } : journalPeriods[periodKey];
+
+  const currentJournal = activePeriod.journal;
+  const totalEntries = currentJournal.reduce((a, d) => a + d.entries.length, 0);
+
+  const presets = [
+    { key: "thisWeek", label: "This Week", sub: "Feb 9–15" },
+    { key: "lastWeek", label: "Last Week", sub: "Feb 2–8" },
+    { key: "thisMonth", label: "This Month", sub: "February" },
+    { key: "last30", label: "Last 30 Days", sub: "Jan 17 – Feb 15" },
+  ];
+
   return (
     <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
       {/* Journal header */}
       <div style={{ padding: "40px 0 24px", textAlign: "center" }}>
         <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>My Journal</div>
-        <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 6 }}>This Week</h2>
-        <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 20 }}>
-          {data.journal.length} days · {data.journal.reduce((a, d) => a + d.entries.length, 0)} entries
+
+        {/* Period selector — title + calendar icon to the right */}
+        <div style={{ position: "relative" }} ref={pickerRef}>
+          <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, margin: 0 }}>
+            {activePeriod.title}
+          </h2>
+
+          {/* Calendar icon — absolute right */}
+          <button
+            onClick={() => setPickerOpen(!pickerOpen)}
+            style={{
+              position: "absolute", top: "50%", right: 0, transform: "translateY(-50%)",
+              background: "none", border: "none", cursor: "pointer",
+              padding: 6, display: "flex", alignItems: "center", justifyContent: "center",
+              opacity: pickerOpen ? 1 : 0.35, transition: "opacity 0.25s ease",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
+            onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.opacity = "0.35"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.inkMuted} strokeWidth="1.5" strokeLinecap="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"/>
+              <path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>
+              <circle cx="8" cy="15" r="1" fill={C.inkMuted} stroke="none"/>
+              <circle cx="12" cy="15" r="1" fill={C.inkMuted} stroke="none"/>
+              <circle cx="16" cy="15" r="1" fill={C.inkMuted} stroke="none"/>
+            </svg>
+          </button>
+
+          {/* Period picker dropdown */}
+          {pickerOpen && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 10px)", right: 0,
+              zIndex: 100, backgroundColor: C.surface, border: `1px solid ${C.rule}`,
+              boxShadow: "0 8px 30px rgba(0,0,0,0.1)", minWidth: 280,
+              animation: "fadeIn 0.2s ease", textAlign: "left",
+            }}>
+              {/* Presets */}
+              <div style={{ padding: "6px 0" }}>
+                {presets.map((p) => (
+                  <button key={p.key} onClick={() => { setPeriodKey(p.key); setPickerOpen(false); }}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      width: "100%", padding: "10px 18px", background: "none", border: "none",
+                      cursor: "pointer", transition: "background-color 0.1s",
+                      backgroundColor: periodKey === p.key ? C.sectionBg : "transparent",
+                    }}
+                    onMouseEnter={(e) => { if (periodKey !== p.key) e.currentTarget.style.backgroundColor = C.sectionBg; }}
+                    onMouseLeave={(e) => { if (periodKey !== p.key) e.currentTarget.style.backgroundColor = "transparent"; }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {periodKey === p.key && <div style={{ width: 3, height: 14, backgroundColor: C.accent, flexShrink: 0 }} />}
+                      <span style={{ fontFamily: F.sans, fontSize: 12, fontWeight: periodKey === p.key ? 500 : 400, color: periodKey === p.key ? C.ink : C.inkLight }}>{p.label}</span>
+                    </div>
+                    <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{p.sub}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Divider */}
+              <div style={{ height: 1, backgroundColor: C.rule }} />
+
+              {/* Custom range */}
+              <div style={{ padding: "14px 18px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.inkMuted} strokeWidth="1.5" strokeLinecap="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>
+                  </svg>
+                  <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px" }}>Custom Range</span>
+                </div>
+                <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>From</label>
+                    <input type="date" value={customFrom} max={customTo || undefined}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                      style={{ width: "100%", padding: "7px 8px", fontFamily: F.sans, fontSize: 12, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>To</label>
+                    <input type="date" value={customTo} min={customFrom || undefined}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                      style={{ width: "100%", padding: "7px 8px", fontFamily: F.sans, fontSize: 12, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }}
+                    />
+                  </div>
+                </div>
+                <button onClick={applyCustom} disabled={!customFrom || !customTo}
+                  style={{
+                    width: "100%", padding: "8px 0",
+                    fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                    color: customFrom && customTo ? C.bg : C.inkFaint,
+                    backgroundColor: customFrom && customTo ? C.ink : C.rule,
+                    border: "none", cursor: customFrom && customTo ? "pointer" : "default",
+                    transition: "background-color 0.15s",
+                  }}>Apply</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginTop: 4, marginBottom: 4 }}>
+          {activePeriod.sub}
         </p>
-        <button onClick={onNewEntry} style={{
-          display: "inline-flex", alignItems: "center", gap: 6,
-          fontFamily: F.sans, fontSize: 12, fontWeight: 500,
-          color: C.bg, backgroundColor: C.ink, border: "none",
-          padding: "10px 28px", cursor: "pointer", transition: "opacity 0.2s",
-        }}
-          onMouseEnter={(e) => e.currentTarget.style.opacity = "0.85"}
-          onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-          New Entry
-        </button>
-        <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "20px auto 0" }} />
+        <p style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint, marginBottom: 20 }}>
+          {currentJournal.length} days · {totalEntries} {totalEntries === 1 ? "entry" : "entries"}
+        </p>
+        <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "0 auto 0" }} />
       </div>
 
       {/* Day by day timeline */}
-      {data.journal.map((day, di) => (
-        <div key={di} style={{ marginBottom: 8 }}>
+      {currentJournal.map((day, di) => (
+        <div key={`${periodKey}-${di}`} style={{ marginBottom: 8 }}>
           {/* Day header */}
           <div style={{
             position: "sticky", top: 48, zIndex: 10,
@@ -705,7 +927,7 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
       <div style={{ textAlign: "center", padding: "40px 0 60px" }}>
         <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "0 auto 20px" }} />
         <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>
-          End of this week's entries
+          End of {activePeriod.title.toLowerCase()} entries
         </p>
         <button onClick={onSwitchToEdition} style={{
           fontFamily: F.sans, fontSize: 11, fontWeight: 500,
@@ -929,6 +1151,36 @@ function ReflectionsView({ C }) {
   const [askQuery, setAskQuery] = useState("");
   const [askAnswer, setAskAnswer] = useState(null);
   const [askLoading, setAskLoading] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [customFrom, setCustomFrom] = useState("2025-12-01");
+  const [customTo, setCustomTo] = useState("2026-02-15");
+  const [customApplied, setCustomApplied] = useState(false);
+  const datePickerRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (datePickerRef.current && !datePickerRef.current.contains(e.target)) {
+        setShowDatePicker(false);
+      }
+    };
+    if (showDatePicker) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showDatePicker]);
+
+  const formatDateLabel = (from, to) => {
+    const f = new Date(from + "T12:00:00");
+    const t = new Date(to + "T12:00:00");
+    const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const fd = `${mo[f.getMonth()]} ${f.getDate()}, ${f.getFullYear()}`;
+    const td = `${mo[t.getMonth()]} ${t.getDate()}, ${t.getFullYear()}`;
+    return `${fd} – ${td}`;
+  };
+
+  const daysBetween = (from, to) => {
+    const f = new Date(from + "T12:00:00");
+    const t = new Date(to + "T12:00:00");
+    return Math.max(1, Math.round((t - f) / (1000 * 60 * 60 * 24)));
+  };
 
   const periods = {
     week: {
@@ -1035,6 +1287,32 @@ function ReflectionsView({ C }) {
       ],
       stats: [{label:"Entries",value:"847"},{label:"Words",value:"198,000"},{label:"Editions",value:"47"},{label:"Avg. per week",value:"18"},{label:"Personal Essays",value:"89"},{label:"Public",value:"34"}],
     },
+    custom: {
+      label: "Custom", date: formatDateLabel(customFrom, customTo),
+      moods: [{day:"W1",val:2,emoji:"🌧"},{day:"W2",val:2,emoji:"🌙"},{day:"W3",val:3,emoji:"🌤"},{day:"W4",val:3,emoji:"🌤"},{day:"W5",val:4,emoji:"☀️"},{day:"W6",val:4,emoji:"☀️"},{day:"W7",val:5,emoji:"⚡"}],
+      trend: [{w:"Start",v:2.2},{w:"",v:2.5},{w:"",v:2.8},{w:"",v:3.1},{w:"",v:3.5},{w:"End",v:4.1}],
+      trendLabel: `${daysBetween(customFrom, customTo)}-Day Trend`, moodHint: "A clear arc of growth across your selected period",
+      reflectionTitle: "Your Custom Period",
+      reflection: [
+        `Across this ${daysBetween(customFrom, customTo)}-day window, your writing tells a story of transformation. The early entries are cautious and observational — you were still finding your footing. By the midpoint, something shifted. The sentences got shorter. The certainty grew.`,
+        "The most striking pattern in this range: your relationship with doubt changed. Early on, doubt was a barrier. Later, it became a companion — something you acknowledged and walked alongside rather than fought against.",
+        "Your AI editor noticed a vocabulary shift of 23% between the first and last weeks of this range. New words for old feelings. That's growth you can measure.",
+      ],
+      connections: [
+        "The first third of this range contains 60% of your 'I think' statements. The last third has almost none.",
+        "Your longest entries cluster in the middle of this period — the transition zone between hesitation and decision.",
+        "Telegram entries increased by 45% in the second half. You started trusting quick thoughts more.",
+        "The themes that opened this period are different from the ones that closed it. You arrived somewhere new.",
+      ],
+      themes: [{theme:"Transformation",count:28,trend:"↑"},{theme:"Self-trust",count:22,trend:"↑"},{theme:"Permission",count:18,trend:"↑"},{theme:"Career",count:15,trend:"↑"},{theme:"Relationships",count:12,trend:"—"}],
+      questions: [
+        "What made you choose this specific time range? What were you looking for?",
+        "The person who wrote the first entry in this range — would she recognize the person who wrote the last?",
+        "Your vocabulary changed 23%. What new words did you find, and what did they replace?",
+        "If this period were a chapter, what would you title it?",
+      ],
+      stats: [{label:"Entries",value:String(Math.round(daysBetween(customFrom, customTo) * 0.65))},{label:"Words",value:String((Math.round(daysBetween(customFrom, customTo) * 180)).toLocaleString())},{label:"Days",value:String(daysBetween(customFrom, customTo))},{label:"Avg. per entry",value:"277"},{label:"Personal Essays",value:String(Math.round(daysBetween(customFrom, customTo) * 0.12))},{label:"Public",value:String(Math.round(daysBetween(customFrom, customTo) * 0.06))}],
+    },
   };
 
   const P = periods[period];
@@ -1076,7 +1354,7 @@ function ReflectionsView({ C }) {
             { key: "quarter", label: "3 Months" },
             { key: "all", label: "All Time" },
           ].map((p) => (
-            <button key={p.key} onClick={() => { setPeriod(p.key); setAskAnswer(null); setAskQuery(""); }} style={{
+            <button key={p.key} onClick={() => { setPeriod(p.key); setAskAnswer(null); setAskQuery(""); setShowDatePicker(false); }} style={{
               fontFamily: F.sans, fontSize: 11, fontWeight: period === p.key ? 500 : 400,
               color: period === p.key ? C.bg : C.inkMuted,
               backgroundColor: period === p.key ? C.ink : "transparent",
@@ -1084,6 +1362,132 @@ function ReflectionsView({ C }) {
               padding: "6px 16px", cursor: "pointer", marginLeft: -1,
             }}>{p.label}</button>
           ))}
+          {/* Custom date button */}
+          <div style={{ position: "relative" }} ref={datePickerRef}>
+            <button onClick={() => {
+              if (period === "custom" && customApplied) {
+                setShowDatePicker(!showDatePicker);
+              } else {
+                setShowDatePicker(!showDatePicker);
+              }
+            }} style={{
+              fontFamily: F.sans, fontSize: 11, fontWeight: period === "custom" ? 500 : 400,
+              color: period === "custom" ? C.bg : C.inkMuted,
+              backgroundColor: period === "custom" ? C.ink : "transparent",
+              border: `1px solid ${period === "custom" ? C.ink : C.rule}`,
+              padding: "6px 16px", cursor: "pointer", marginLeft: -1,
+              display: "flex", alignItems: "center", gap: 5,
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>
+              </svg>
+              {period === "custom" && customApplied ? "Custom" : "Custom"}
+            </button>
+
+            {/* Date picker dropdown */}
+            {showDatePicker && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 100,
+                backgroundColor: C.surface, border: `1px solid ${C.rule}`,
+                boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
+                padding: 0, minWidth: 300,
+                animation: "fadeIn 0.2s ease",
+              }}>
+                {/* Header */}
+                <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${C.rule}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <span style={{ color: C.accent, fontSize: 12 }}>✦</span>
+                    <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>Custom Range</span>
+                  </div>
+                  <p style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, lineHeight: 1.4 }}>
+                    Select a date range to analyze your writing
+                  </p>
+                </div>
+
+                {/* Date inputs */}
+                <div style={{ padding: "16px 18px" }}>
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>From</label>
+                    <input
+                      type="date"
+                      value={customFrom}
+                      max={customTo}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                      style={{
+                        width: "100%", padding: "9px 12px",
+                        fontFamily: F.sans, fontSize: 13, color: C.ink,
+                        backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`,
+                        outline: "none", cursor: "pointer",
+                      }}
+                    />
+                  </div>
+                  <div style={{ marginBottom: 18 }}>
+                    <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>To</label>
+                    <input
+                      type="date"
+                      value={customTo}
+                      min={customFrom}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                      style={{
+                        width: "100%", padding: "9px 12px",
+                        fontFamily: F.sans, fontSize: 13, color: C.ink,
+                        backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`,
+                        outline: "none", cursor: "pointer",
+                      }}
+                    />
+                  </div>
+
+                  {/* Quick presets */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Quick Ranges</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {[
+                        { label: "Last 7 days", from: "2026-02-09", to: "2026-02-15" },
+                        { label: "Last 30 days", from: "2026-01-17", to: "2026-02-15" },
+                        { label: "Last 90 days", from: "2025-11-18", to: "2026-02-15" },
+                        { label: "This year", from: "2026-01-01", to: "2026-02-15" },
+                        { label: "Last year", from: "2025-01-01", to: "2025-12-31" },
+                        { label: "Dec–Feb", from: "2025-12-01", to: "2026-02-15" },
+                      ].map((preset, i) => (
+                        <button key={i} onClick={() => { setCustomFrom(preset.from); setCustomTo(preset.to); }} style={{
+                          fontFamily: F.sans, fontSize: 10, color: customFrom === preset.from && customTo === preset.to ? C.accent : C.inkMuted,
+                          backgroundColor: "transparent",
+                          border: `1px solid ${customFrom === preset.from && customTo === preset.to ? C.accent : C.rule}`,
+                          padding: "4px 10px", cursor: "pointer",
+                          transition: "border-color 0.15s",
+                        }}
+                          onMouseEnter={(e) => e.currentTarget.style.borderColor = C.ink}
+                          onMouseLeave={(e) => e.currentTarget.style.borderColor = (customFrom === preset.from && customTo === preset.to ? C.accent : C.rule)}
+                        >{preset.label}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Summary + Apply */}
+                  <div style={{ borderTop: `1px solid ${C.rule}`, paddingTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkMuted }}>{daysBetween(customFrom, customTo)} days selected</div>
+                    </div>
+                    <button onClick={() => {
+                      setPeriod("custom");
+                      setCustomApplied(true);
+                      setShowDatePicker(false);
+                      setAskAnswer(null);
+                      setAskQuery("");
+                    }} style={{
+                      fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                      color: C.bg, backgroundColor: C.ink,
+                      border: "none", padding: "8px 20px", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 5,
+                    }}>
+                      <span style={{ color: C.accent, fontSize: 10 }}>✦</span>
+                      Analyze
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1320,6 +1724,7 @@ function EditionSwitcher({ C }) {
 // ============================================================
 export default function App() {
   const [loaded, setLoaded] = useState(false);
+  const [session, setSession] = useState(undefined); // undefined=loading, null=logged out, object=logged in
   const [mode, setMode] = useState("light");
   const [accent, setAccent] = useState("red");
   const [editorOpen, setEditorOpen] = useState(false);
@@ -1328,9 +1733,48 @@ export default function App() {
   const [motto, setMotto] = useState("All the life that's fit to print");
   const [view, setView] = useState("journal"); // journal | edition | archives | sections | reflections
 
+  // Auth: check session on mount + listen for changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   useEffect(() => { setTimeout(() => setLoaded(true), 100); }, []);
   const C = getTheme(mode, accent);
   const d = MOCK;
+
+  // Populate user data from session
+  const authUser = session?.user;
+  if (authUser) {
+    d.user.name = authUser.user_metadata?.name || authUser.email?.split("@")[0] || "User";
+    d.user.email = authUser.email || "";
+    d.user.avatar = (d.user.name[0] || "U").toUpperCase();
+  }
+
+  // Loading state
+  if (session === undefined) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap');
+          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        `}</style>
+        <div style={{ textAlign: "center", animation: "fadeIn 0.4s ease" }}>
+          <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 28, fontWeight: 700, color: "#121212" }}>The Hauss</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Not logged in — show auth page
+  if (!session) {
+    return <AuthPage />;
+  }
 
   return (
     <div style={{ backgroundColor: C.bg, color: C.ink, minHeight: "100vh", opacity: loaded ? 1 : 0, transition: "opacity 0.6s ease, background-color 0.4s ease, color 0.4s ease" }}>
