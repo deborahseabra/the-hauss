@@ -1,6 +1,23 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import AuthPage from "./AuthPage";
+import {
+  fetchProfile,
+  fetchJournal,
+  fetchLatestEdition,
+  fetchAllEditions,
+  fetchSections,
+  fetchAllReflections,
+  fetchReflection,
+  createEntry,
+  updateProfile,
+  fetchEntriesFull,
+  fetchEditionEntriesFull,
+  fetchPrompts,
+  updatePrompt,
+  uploadAttachment,
+  createAttachments,
+} from "./lib/api";
 
 const PALETTES = {
   red: { primary: "#c41e1e", light: "#e85d5d", bg: "#fef5f5", bgDark: "#2a1818" },
@@ -20,108 +37,90 @@ function getTheme(mode, accent) {
   return { bg: "#fff", surface: "#fff", ink: "#121212", inkLight: "#363636", inkMuted: "#727272", inkFaint: "#999", rule: "#e2e2e2", ruleDark: "#121212", accent: p.primary, accentBg: p.bg, overlay: "rgba(0,0,0,0.6)", sectionBg: "#f7f7f7", platformBg: "#fafafa", platformBorder: "#e8e8e8" };
 }
 
-const MOCK = {
-  user: { name: "Deborah", email: "deborah@email.com", plan: "free", avatar: "D" },
-  edition: { week: "Feb 9 – 15, 2026", number: "Vol. I · No. 47", entryCount: 7 },
-  weather: "São Paulo · 28°C",
-  topStories: [
-    { section: "PERSONAL ESSAY", headline: "After Three Years of Doubt, She Finally Made the Leap", subhead: "A reflection on leaving the comfort of corporate life to pursue something that felt terrifyingly right", excerpt: "It wasn't courage that made me do it. It was the slow, creeping realization that staying put required more bravery than leaving ever would. The morning I resigned, the sky over Paulista was absurdly blue — the kind of blue that feels like the universe is showing off.", readTime: "8 min read", date: "Feb 14", source: "telegram", isPublic: true, aiEdited: true },
-    { section: "DISPATCH", headline: "A Week of Small Victories and One Spectacular Failure", subhead: "Monday's breakthrough was almost enough to make up for Thursday's kitchen disaster", excerpt: "The mushroom stroganoff was, by any objective measure, a catastrophe.", readTime: "5 min read", date: "Feb 12", source: "app", isPublic: false, aiEdited: true },
-  ],
-  briefing: [
-    { day: "Mon", note: "Started the week with intention. Wrote 3 pages in the morning." },
-    { day: "Tue", note: "Lunch with Marina. She's moving to Lisbon." },
-    { day: "Wed", note: "Nothing extraordinary. Sometimes that's the point." },
-    { day: "Thu", note: "The stroganoff incident. Shame is just surprise in disguise." },
-    { day: "Fri", note: "Golden hour from the apartment. Took 12 photos. Kept 1." },
-    { day: "Sat", note: "Read Clarice Lispector until 2am. Underlined everything." },
-    { day: "Sun", note: "Resigned. The sky was absurdly blue." },
-  ],
-  sections: [
-    { name: "Personal Essays", count: 12 }, { name: "Dispatches", count: 23 },
-    { name: "Letters to Self", count: 7 }, { name: "The Mood Index", count: 28 },
-  ],
-  moreStories: [
-    { section: "OPINION", headline: "Why I Stopped Apologizing for Taking Up Space", readTime: "4 min", isPublic: true },
-    { section: "CULTURE", headline: "The Playlist That Got Me Through January", readTime: "3 min", isPublic: false },
-    { section: "LETTER TO SELF", headline: "Dear Future Me: Don't Forget How This Felt", readTime: "2 min", isPublic: false },
-  ],
-  editorial: { headline: "The Editor's Note", content: "This was a week of inflection. Seven entries across seven days — unusual consistency. The AI editor noticed a shift from observation to declaration, from 'I noticed' to 'I decided.' The recurring theme: permission. Something is changing." },
-  stats: { totalEntries: 847, thisEdition: 7, editions: 47, wordsThisWeek: 4280 },
-  journal: [
-    { date: "Sunday, February 15", entries: [
-      { time: "11:45 PM", text: "Can't sleep. Started reading Clarice Lispector again — 'A Hora da Estrela.' Every sentence feels like she's writing directly to me, across decades. Underlined almost everything. There's a line about how we only become who we are at the moment we lose ourselves. I keep turning it over.", mood: "🌙", section: "Personal Essay", isPublic: false, source: "app" },
-    ]},
-    { date: "Saturday, February 14", entries: [
-      { time: "6:42 PM", text: "Golden hour from the apartment balcony today. The light in São Paulo at this hour — it turns everything amber. Took 12 photos. Only kept one. It's the one where you can't tell what you're looking at. Just light and shadow and the edge of a building. That's the one that felt true.", mood: "☀️", section: "Dispatch", isPublic: true, source: "telegram", hasPhoto: true },
-      { time: "12:15 PM", text: "Lunch with Marina at the Italian place on Augusta. She told me she's moving to Lisbon in March. I felt three things at once: happy for her, jealous of her certainty, and relieved that someone close to me is also making a leap. We split the bill and she cried a little in the parking lot. I pretended I didn't notice, which is maybe what friends do.", mood: "🌤", section: "Dispatch", isPublic: false, source: "telegram" },
-    ]},
-    { date: "Friday, February 13", entries: [
-      { time: "9:30 PM", text: "The mushroom stroganoff was, by any objective measure, a catastrophe. The mushrooms were somehow both overcooked and underflavored. The cream sauce separated. I ate it anyway, standing in the kitchen, because admitting defeat felt worse than the taste. Note to self: when the recipe says 'medium heat,' it means medium heat.", mood: "⚡", section: "Dispatch", isPublic: false, source: "app" },
-    ]},
-    { date: "Thursday, February 12", entries: [
-      { time: "7:30 AM", text: "Woke up before the alarm. First time this month. Lay there for ten minutes just listening to the city wake up. There's a specific sound São Paulo makes at 7am — traffic starting to hum, a dog barking somewhere in Pinheiros, the coffee shop downstairs pulling its metal gate up. It's not quiet, but it's a kind of peace.", mood: "🌤", section: "Letter to Self", isPublic: false, source: "app" },
-      { time: "11:00 PM", text: "Breakthrough at work today. Finally cracked the retention model I've been wrestling with for weeks. The answer was embarrassingly simple — we were measuring the wrong moment. It's not about when people leave, it's about the last time they felt seen. Wrote up the whole thing in one sitting. 2,400 words. Felt electric.", mood: "⚡", section: "Personal Essay", isPublic: true, source: "app" },
-    ]},
-    { date: "Wednesday, February 11", entries: [
-      { time: "8:15 PM", text: "Nothing extraordinary happened today. Worked. Ate. Walked to the pharmacy and back. Watched the light change from the window. Sometimes I think the unremarkable days are the ones that hold everything together — the ordinary glue between the chapters. Today was glue. And that's okay.", mood: "🌤", section: "Dispatch", isPublic: false, source: "telegram" },
-    ]},
-  ],
-};
+function LoadingBlock({ C, text }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", animation: "fadeIn 0.3s ease" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ width: 20, height: 20, border: `2px solid ${C.rule}`, borderTop: `2px solid ${C.accent}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
+        <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkMuted }}>{text || "Loading..."}</p>
+      </div>
+    </div>
+  );
+}
 
 // ============================================================
 // AI EDITOR COMPONENT
 // ============================================================
-function AiEditor({ text, C, onApply }) {
+function AiEditor({ text, C, onApply, session }) {
   const [step, setStep] = useState("choose"); // choose | tone | processing | result
   const [aiMode, setAiMode] = useState(null); // proofread | rewrite
   const [tone, setTone] = useState(null);
   const [result, setResult] = useState(null);
   const [showPreview, setShowPreview] = useState(true);
+  const [aiError, setAiError] = useState(null);
   const hasText = text.trim().length > 20;
 
-  const handleStart = (mode) => {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+
+  const callAiEditor = async (mode, selectedTone) => {
+    setAiError(null);
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/ai-editor`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ text, mode, tone: selectedTone || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(err.error || err.details || `HTTP ${res.status}`);
+      }
+      return await res.json();
+    } catch (err) {
+      console.error("AI Editor error:", err);
+      setAiError(err.message || "Something went wrong. Please try again.");
+      setStep("choose");
+      setAiMode(null);
+      setTone(null);
+      return null;
+    }
+  };
+
+  const handleStart = async (mode) => {
     setAiMode(mode);
     if (mode === "proofread") {
       setStep("processing");
-      setTimeout(() => {
+      const data = await callAiEditor("proofread");
+      if (data) {
         setResult({
           mode: "proofread",
-          body: "It wasn't courage that made me do it. It was the slow, creeping realization that staying put required more bravery than leaving ever would.\n\nThe morning I resigned, the sky over Paulista was absurdly blue — the kind of blue that feels like the universe is showing off. I remember thinking: if the world can be this gratuitously beautiful on a Tuesday, maybe I can afford to be a little reckless.\n\nThree years I'd spent in that office. Three years of telling myself \"next quarter.\" Three years of watching the window and wondering what the light looked like from the other side.",
-          changes: 3,
-          changesList: ["\"next quarter\" → corrected punctuation", "Removed dangling modifier in paragraph 2", "Fixed comma splice in final sentence"],
+          body: data.body,
+          changes: data.changes_count || 0,
+          changesList: data.changes_list || [],
         });
         setStep("result");
-      }, 1800);
+      }
     } else {
       setStep("tone");
     }
   };
 
-  const handleRewrite = (selectedTone) => {
+  const handleRewrite = async (selectedTone) => {
     setTone(selectedTone);
     setStep("processing");
-    const results = {
-      intimate: {
-        headline: "The Morning I Let Go",
-        subhead: "A quiet reckoning with three years of 'not yet'",
-        body: "I didn't plan it. There was no dramatic moment of clarity, no sign from the universe — unless you count the sky, which was so absurdly blue that Tuesday morning it felt almost personal. Like the world was daring me.\n\nI'd been carrying the resignation letter in my head for three years. Not the words — I never got that far — just the weight of it. The knowing. Every Monday felt like swallowing something I couldn't name.\n\nWhen I finally said the words out loud, my voice didn't shake. That surprised me most of all.",
-      },
-      literary: {
-        headline: "After Three Years of Doubt, She Finally Made the Leap",
-        subhead: "A reflection on leaving the comfort of corporate life to pursue something that felt terrifyingly right",
-        body: "It wasn't courage that propelled her out the door — courage implies a reckoning with fear, and what she felt that morning was something quieter, more geological. A tectonic shift completed in silence.\n\nThe sky over Paulista Avenue was performing that particular shade of blue that exists only in São Paulo in February, when the rain has scrubbed the atmosphere clean and the city stands blinking in its own clarity. She took this as neither omen nor metaphor. The sky was simply blue. She was simply leaving.\n\nThree years she had rehearsed this departure in the conditional tense. 'I would leave if.' 'I could leave when.' The subjunctive mood of a life deferred.",
-      },
-      journalistic: {
-        headline: "Breaking a Three-Year Pattern: One Woman's Decision to Leave Corporate Life",
-        subhead: "After years of deliberation, a São Paulo professional makes the leap — and reflects on what it took",
-        body: "On a Tuesday morning in February, after three years of internal deliberation, Deborah submitted her resignation. The decision, she says, was less a dramatic turning point than the conclusion of a long, quiet process.\n\n\"It wasn't courage,\" she wrote in her journal that evening. \"It was arithmetic. The cost of staying had finally exceeded the cost of leaving.\"\n\nThe move comes amid a broader trend of professionals in Brazil's tech sector reevaluating their career trajectories. But for Deborah, the calculus was personal: three years of postponement, measured in Monday mornings and unreturned calls to a life she hadn't yet started living.",
-      },
-    };
-    setTimeout(() => {
-      setResult({ mode: "rewrite", tone: selectedTone, ...results[selectedTone] });
+    const data = await callAiEditor("rewrite", selectedTone);
+    if (data) {
+      setResult({
+        mode: "rewrite",
+        tone: selectedTone,
+        headline: data.headline,
+        subhead: data.subhead,
+        body: data.body,
+      });
       setStep("result");
-    }, 2500);
+    }
   };
 
   const reset = () => { setStep("choose"); setAiMode(null); setTone(null); setResult(null); setShowPreview(true); };
@@ -134,6 +133,11 @@ function AiEditor({ text, C, onApply }) {
           <span style={{ color: C.accent, fontSize: 16 }}>✦</span>
           <span style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 600, color: C.ink, textTransform: "uppercase", letterSpacing: "1px" }}>AI Editor</span>
         </div>
+        {aiError && (
+          <div style={{ fontFamily: F.sans, fontSize: 11, color: "#c41e1e", marginBottom: 12, padding: "8px 12px", backgroundColor: "#fef5f5", border: "1px solid #f5d5d5" }}>
+            {aiError}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 12 }}>
           {/* PROOFREAD */}
           <button onClick={() => hasText && handleStart("proofread")} style={{
@@ -313,7 +317,41 @@ function AiEditor({ text, C, onApply }) {
 // ============================================================
 // EDITOR VIEW
 // ============================================================
-function EditorView({ onClose, C }) {
+function LocationForm({ C, onAdd, onCancel }) {
+  const [name, setName] = useState("");
+  const [lat, setLat] = useState("");
+  const [lng, setLng] = useState("");
+  return (
+    <div style={{ marginTop: 8, padding: "10px", backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, animation: "fadeIn 0.2s ease" }}>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Place name" style={{ width: "100%", padding: "6px 8px", marginBottom: 6, fontFamily: F.sans, fontSize: 11, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="Latitude" type="number" step="any" style={{ flex: 1, padding: "6px 8px", fontFamily: F.mono, fontSize: 10, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
+        <input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="Longitude" type="number" step="any" style={{ flex: 1, padding: "6px 8px", fontFamily: F.mono, fontSize: 10, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={() => name.trim() && onAdd(name, lat, lng)} disabled={!name.trim()} style={{ flex: 1, padding: "5px", fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: name.trim() ? C.bg : C.inkFaint, backgroundColor: name.trim() ? C.ink : C.rule, border: "none", cursor: name.trim() ? "pointer" : "default" }}>Add</button>
+        <button onClick={onCancel} style={{ padding: "5px 10px", fontFamily: F.sans, fontSize: 10, color: C.inkMuted, background: "none", border: `1px solid ${C.rule}`, cursor: "pointer" }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function LinkForm({ C, onAdd, onCancel }) {
+  const [url, setUrl] = useState("");
+  const [linkTitle, setLinkTitle] = useState("");
+  return (
+    <div style={{ marginTop: 8, padding: "10px", backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, animation: "fadeIn 0.2s ease" }}>
+      <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." style={{ width: "100%", padding: "6px 8px", marginBottom: 6, fontFamily: F.sans, fontSize: 11, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
+      <input value={linkTitle} onChange={(e) => setLinkTitle(e.target.value)} placeholder="Title (optional)" style={{ width: "100%", padding: "6px 8px", marginBottom: 8, fontFamily: F.sans, fontSize: 11, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={() => url.trim() && onAdd(url, linkTitle)} disabled={!url.trim()} style={{ flex: 1, padding: "5px", fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: url.trim() ? C.bg : C.inkFaint, backgroundColor: url.trim() ? C.ink : C.rule, border: "none", cursor: url.trim() ? "pointer" : "default" }}>Add</button>
+        <button onClick={onCancel} style={{ padding: "5px 10px", fontFamily: F.sans, fontSize: 10, color: C.inkMuted, background: "none", border: `1px solid ${C.rule}`, cursor: "pointer" }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function EditorView({ onClose, onPublished, C, userId, session }) {
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
   const [section, setSection] = useState("dispatch");
@@ -321,12 +359,60 @@ function EditorView({ onClose, C }) {
   const [isPublic, setIsPublic] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [aiKey, setAiKey] = useState(0); // reset AI editor
+  const [aiKey, setAiKey] = useState(0);
+  const [pendingAttachments, setPendingAttachments] = useState([]);
+  const [attachPanel, setAttachPanel] = useState(null); // null | 'photo' | 'location' | 'link'
+  const [photoUploading, setPhotoUploading] = useState(false);
   const ref = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => { if (ref.current) setTimeout(() => ref.current.focus(), 200); }, []);
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploading(true);
+    try {
+      const url = await uploadAttachment(userId, file);
+      setPendingAttachments((prev) => [
+        ...prev,
+        { type: "photo", url, metadata: { caption: "" }, _preview: URL.createObjectURL(file) },
+      ]);
+      setAttachPanel(null);
+    } catch (err) {
+      console.error("Photo upload failed:", err);
+    } finally {
+      setPhotoUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleAddLocation = (name, lat, lng) => {
+    setPendingAttachments((prev) => [
+      ...prev,
+      { type: "location", url: null, metadata: { name: name || "Unnamed", lat: parseFloat(lat) || 0, lng: parseFloat(lng) || 0 } },
+    ]);
+    setAttachPanel(null);
+  };
+
+  const handleAddLink = (url, linkTitle) => {
+    setPendingAttachments((prev) => [
+      ...prev,
+      { type: "link", url, metadata: { title: linkTitle || "" } },
+    ]);
+    setAttachPanel(null);
+  };
+
+  const removeAttachment = (index) => {
+    setPendingAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateAttachmentCaption = (index, caption) => {
+    setPendingAttachments((prev) => prev.map((a, i) => i === index ? { ...a, metadata: { ...a.metadata, caption } } : a));
+  };
 
   const handleApplyAi = (result) => {
     if (result.mode === "rewrite") {
@@ -341,10 +427,31 @@ function EditorView({ onClose, C }) {
     setAiKey(k => k + 1);
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (!text.trim()) return;
     setIsSaving(true);
-    setTimeout(() => { setIsSaving(false); setShowSuccess(true); }, 1200);
+    setSaveError(null);
+    try {
+      const entry = await createEntry({
+        userId,
+        title: title.trim() || null,
+        body: text,
+        section,
+        mood,
+        isPublic,
+        source: "app",
+      });
+      if (pendingAttachments.length > 0) {
+        await createAttachments(entry.id, userId, pendingAttachments);
+      }
+      setShowSuccess(true);
+      if (onPublished) onPublished();
+    } catch (err) {
+      console.error("Failed to publish entry:", err);
+      setSaveError("Failed to save. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const secs = [
@@ -382,6 +489,7 @@ function EditorView({ onClose, C }) {
           <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>NEW ENTRY</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {saveError && <span style={{ fontFamily: F.sans, fontSize: 11, color: "#c41e1e" }}>{saveError}</span>}
           <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>{wordCount > 0 ? `${wordCount} words` : ""}</span>
           <button onClick={() => setIsPublic(!isPublic)} style={{
             display: "flex", alignItems: "center", gap: 5,
@@ -415,7 +523,7 @@ function EditorView({ onClose, C }) {
                 {secs.find(s => s.key === section)?.label}
                 {isPublic && <span style={{ marginLeft: 8, color: C.inkFaint, fontWeight: 400 }}>· Public</span>}
               </div>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Headline (optional — AI can generate one)" style={{
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Headline" style={{
                 width: "100%", border: "none", outline: "none", fontFamily: F.display, fontSize: 32, fontWeight: 700,
                 color: C.ink, backgroundColor: "transparent", lineHeight: 1.2, marginBottom: 8, padding: 0,
               }} />
@@ -431,7 +539,7 @@ Your AI editor can proofread this or transform it into a polished editorial piec
           {/* FIXED AI EDITOR BAR at bottom — always visible */}
           <div style={{ flexShrink: 0, borderTop: `1px solid ${C.rule}`, backgroundColor: C.bg, maxHeight: "45vh", overflow: "auto" }}>
             <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 32px" }}>
-              <AiEditor key={aiKey} text={text} C={C} onApply={handleApplyAi} />
+              <AiEditor key={aiKey} text={text} C={C} onApply={handleApplyAi} session={session} />
             </div>
           </div>
         </div>
@@ -482,11 +590,61 @@ Your AI editor can proofread this or transform it into a polished editorial piec
             {/* Attach */}
             <div style={{ padding: "24px 20px" }}>
               <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 12 }}>Attach</div>
-              {[{ icon: "📷", label: "Photo" }, { icon: "📍", label: "Location" }, { icon: "🔗", label: "Link" }].map((a, i) => (
-                <button key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, width: "100%", background: "none", border: `1px solid ${C.rule}`, cursor: "pointer", fontFamily: F.sans, fontSize: 12, color: C.inkLight, textAlign: "left" }}>
-                  <span>{a.icon}</span>{a.label}
-                </button>
-              ))}
+              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoSelect} />
+              <button onClick={() => { setAttachPanel(attachPanel === "photo" ? null : "photo"); fileInputRef.current?.click(); }} disabled={photoUploading} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, width: "100%", background: "none", border: `1px solid ${C.rule}`, cursor: photoUploading ? "default" : "pointer", fontFamily: F.sans, fontSize: 12, color: C.inkLight, textAlign: "left", opacity: photoUploading ? 0.6 : 1 }}>
+                <span>📷</span>{photoUploading ? "Uploading..." : "Photo"}
+              </button>
+              <button onClick={() => setAttachPanel(attachPanel === "location" ? null : "location")} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, width: "100%", background: "none", border: `1px solid ${attachPanel === "location" ? C.accent : C.rule}`, cursor: "pointer", fontFamily: F.sans, fontSize: 12, color: C.inkLight, textAlign: "left" }}>
+                <span>📍</span>Location
+              </button>
+              <button onClick={() => setAttachPanel(attachPanel === "link" ? null : "link")} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, width: "100%", background: "none", border: `1px solid ${attachPanel === "link" ? C.accent : C.rule}`, cursor: "pointer", fontFamily: F.sans, fontSize: 12, color: C.inkLight, textAlign: "left" }}>
+                <span>🔗</span>Link
+              </button>
+
+              {/* Location inline form */}
+              {attachPanel === "location" && (
+                <LocationForm C={C} onAdd={handleAddLocation} onCancel={() => setAttachPanel(null)} />
+              )}
+
+              {/* Link inline form */}
+              {attachPanel === "link" && (
+                <LinkForm C={C} onAdd={handleAddLink} onCancel={() => setAttachPanel(null)} />
+              )}
+
+              {/* Pending attachments preview */}
+              {pendingAttachments.length > 0 && (
+                <div style={{ marginTop: 14, borderTop: `1px solid ${C.rule}`, paddingTop: 12 }}>
+                  <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>
+                    {pendingAttachments.length} attached
+                  </div>
+                  {pendingAttachments.map((att, i) => (
+                    <div key={i} style={{ marginBottom: 8, padding: "6px 8px", backgroundColor: C.sectionBg, border: `1px solid ${C.rule}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {att.type === "photo" && att._preview && (
+                          <img src={att._preview} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 2 }} />
+                        )}
+                        {att.type === "photo" && !att._preview && <span style={{ fontSize: 14 }}>📷</span>}
+                        {att.type === "location" && <span style={{ fontSize: 14 }}>📍</span>}
+                        {att.type === "link" && <span style={{ fontSize: 14 }}>🔗</span>}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontFamily: F.sans, fontSize: 10, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {att.type === "photo" ? (att.metadata?.caption || "Photo") : att.type === "location" ? att.metadata?.name : (att.metadata?.title || att.url)}
+                          </div>
+                        </div>
+                        <button onClick={() => removeAttachment(i)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkFaint, fontSize: 14, padding: 2, lineHeight: 1 }}>x</button>
+                      </div>
+                      {att.type === "photo" && (
+                        <input
+                          value={att.metadata?.caption || ""}
+                          onChange={(e) => updateAttachmentCaption(i, e.target.value)}
+                          placeholder="Add caption..."
+                          style={{ width: "100%", marginTop: 4, padding: "3px 6px", fontFamily: F.body, fontSize: 10, fontStyle: "italic", color: C.inkMuted, backgroundColor: "transparent", border: `1px solid ${C.rule}`, outline: "none" }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -498,12 +656,31 @@ Your AI editor can proofread this or transform it into a polished editorial piec
 // ============================================================
 // SETTINGS
 // ============================================================
-function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, pubName, setPubName, motto, setMotto }) {
+function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, pubName, setPubName, motto, setMotto, userId }) {
   const [ln, setLn] = useState(pubName);
   const [lm, setLm] = useState(motto);
+  const [saving, setSaving] = useState(false);
   useEffect(() => { setLn(pubName); setLm(motto); }, [pubName, motto]);
   if (!isOpen) return null;
-  const save = () => { setPubName(ln); setMotto(lm); onClose(); };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      setPubName(ln);
+      setMotto(lm);
+      await updateProfile(userId, {
+        publication_name: ln,
+        motto: lm,
+        theme_mode: mode,
+        theme_accent: accent,
+      });
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+    } finally {
+      setSaving(false);
+      onClose();
+    }
+  };
 
   return (
     <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, backgroundColor: C.overlay, zIndex: 2000, display: "flex", justifyContent: "flex-end", animation: "fadeIn 0.2s ease" }}>
@@ -573,7 +750,7 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
             <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Motto</div>
             <input value={lm} onChange={(e) => setLm(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
           </div>
-          <button onClick={save} style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: "pointer" }}>Save Changes</button>
+          <button onClick={save} disabled={saving} style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>{saving ? "Saving..." : "Save Changes"}</button>
         </div>
       </div>
     </div>
@@ -583,7 +760,7 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
 // ============================================================
 // PLATFORM HEADER
 // ============================================================
-function PlatformHeader({ user, C, onSettings, onEditor }) {
+function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isMaster }) {
   const [menu, setMenu] = useState(false);
   const menuRef = useRef(null);
 
@@ -624,6 +801,11 @@ function PlatformHeader({ user, C, onSettings, onEditor }) {
               {["My Publication", "Settings", "Export"].map((item, i) => (
                 <button key={i} onClick={() => { setMenu(false); if (item === "Settings") onSettings(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer" }}>{item}</button>
               ))}
+              {isMaster && (
+                <button onClick={() => { setMenu(false); if (onAdmin) onAdmin(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.accent, cursor: "pointer", fontWeight: 500 }}>
+                  ✦ Admin
+                </button>
+              )}
               <div style={{ height: 1, backgroundColor: C.rule }} />
               <button onClick={handleSignOut} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkMuted, cursor: "pointer" }}>Sign Out</button>
             </div>}
@@ -637,11 +819,14 @@ function PlatformHeader({ user, C, onSettings, onEditor }) {
 // ============================================================
 // JOURNAL VIEW — Personal, intimate, day-by-day
 // ============================================================
-function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
+function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, onOpenArticle }) {
   const [periodKey, setPeriodKey] = useState("thisWeek");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [journal, setJournal] = useState([]);
+  const [fullEntries, setFullEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
   const pickerRef = useRef(null);
 
   useEffect(() => {
@@ -650,78 +835,62 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
     return () => document.removeEventListener("mousedown", outside);
   }, [pickerOpen]);
 
-  const journalPeriods = {
-    thisWeek: {
-      title: "This Week",
-      sub: "Feb 9 – 15, 2026",
-      journal: data.journal,
-    },
-    lastWeek: {
-      title: "Last Week",
-      sub: "Feb 2 – 8, 2026",
-      journal: [
-        { date: "Sunday, February 8", entries: [
-          { time: "10:30 PM", text: "Finished the book Marina lent me. Every ending feels like a small death — the world you lived in for 300 pages just stops existing. I sat with the last page open for a while, not ready to close it.", mood: "🌙", section: "Review", isPublic: false, source: "app" },
-        ]},
-        { date: "Saturday, February 7", entries: [
-          { time: "3:15 PM", text: "Farmers market on Rua dos Pinheiros. Bought too many tomatoes again. There's something about holding produce that makes me optimistic — all that potential energy, waiting to become dinner or disaster.", mood: "☀️", section: "Dispatch", isPublic: false, source: "telegram" },
-        ]},
-        { date: "Friday, February 6", entries: [
-          { time: "11:45 PM", text: "The presentation went well. Better than well — it landed. I could feel the room shift when I showed the retention data. Three months of work compressed into twelve slides. Afterward, my manager said 'this changes things.' I'm still not sure what she meant.", mood: "⚡", section: "Personal Essay", isPublic: true, source: "app" },
-        ]},
-        { date: "Wednesday, February 4", entries: [
-          { time: "7:00 PM", text: "Rain all day. Worked from the couch with the window cracked open. The sound of São Paulo rain is different from any other rain — it's theatrical, unapologetic. Everything smelled like wet concrete and jasmine.", mood: "🌧", section: "Dispatch", isPublic: false, source: "telegram" },
-        ]},
-        { date: "Monday, February 2", entries: [
-          { time: "8:00 AM", text: "New month energy. Made a list of everything I want to do in February. It's ambitious — probably too ambitious. But there's something about writing it down that makes it feel possible. First item: stop postponing the hard conversation.", mood: "🌤", section: "Letter to Self", isPublic: false, source: "app" },
-        ]},
-      ],
-    },
-    thisMonth: {
-      title: "February",
-      sub: "Feb 1 – 15, 2026",
-      journal: [
-        ...data.journal,
-        { date: "Sunday, February 8", entries: [
-          { time: "10:30 PM", text: "Finished the book Marina lent me. Every ending feels like a small death — the world you lived in for 300 pages just stops existing. I sat with the last page open for a while, not ready to close it.", mood: "🌙", section: "Review", isPublic: false, source: "app" },
-        ]},
-        { date: "Saturday, February 7", entries: [
-          { time: "3:15 PM", text: "Farmers market on Rua dos Pinheiros. Bought too many tomatoes again. There's something about holding produce that makes me optimistic — all that potential energy, waiting to become dinner or disaster.", mood: "☀️", section: "Dispatch", isPublic: false, source: "telegram" },
-        ]},
-        { date: "Friday, February 6", entries: [
-          { time: "11:45 PM", text: "The presentation went well. Better than well — it landed. I could feel the room shift when I showed the retention data.", mood: "⚡", section: "Personal Essay", isPublic: true, source: "app" },
-        ]},
-        { date: "Wednesday, February 4", entries: [
-          { time: "7:00 PM", text: "Rain all day. Worked from the couch with the window cracked open. The sound of São Paulo rain is different from any other rain — it's theatrical, unapologetic.", mood: "🌧", section: "Dispatch", isPublic: false, source: "telegram" },
-        ]},
-        { date: "Monday, February 2", entries: [
-          { time: "8:00 AM", text: "New month energy. Made a list of everything I want to do in February. It's ambitious — probably too ambitious. But there's something about writing it down that makes it feel possible.", mood: "🌤", section: "Letter to Self", isPublic: false, source: "app" },
-        ]},
-      ],
-    },
-    last30: {
-      title: "Last 30 Days",
-      sub: "Jan 17 – Feb 15, 2026",
-      journal: [
-        ...data.journal,
-        { date: "Sunday, February 8", entries: [
-          { time: "10:30 PM", text: "Finished the book Marina lent me. Every ending feels like a small death — the world you lived in for 300 pages just stops existing.", mood: "🌙", section: "Review", isPublic: false, source: "app" },
-        ]},
-        { date: "Wednesday, February 4", entries: [
-          { time: "7:00 PM", text: "Rain all day. Worked from the couch with the window cracked open. The sound of São Paulo rain is different from any other rain — it's theatrical, unapologetic.", mood: "🌧", section: "Dispatch", isPublic: false, source: "telegram" },
-        ]},
-        { date: "Sunday, January 26", entries: [
-          { time: "9:00 PM", text: "January is almost over and I still haven't done the thing I promised myself I'd do. But maybe the promise was the wrong shape. Maybe it needs to be smaller, more specific. Not 'change your life' but 'send one email.'", mood: "🌙", section: "Letter to Self", isPublic: false, source: "app" },
-        ]},
-        { date: "Tuesday, January 21", entries: [
-          { time: "6:30 PM", text: "Cooked risotto for the first time. Forty-five minutes of stirring. It was meditative in a way I didn't expect — the repetition, the patience, the slow transformation. The risotto was fine. The process was the point.", mood: "🌤", section: "Dispatch", isPublic: false, source: "app" },
-        ]},
-        { date: "Friday, January 17", entries: [
-          { time: "11:15 PM", text: "Started rereading my entries from December. It's strange to meet yourself from two months ago. She was tired in a way I'd already forgotten. I want to write her a letter, but she wouldn't believe what's coming.", mood: "🌙", section: "Personal Essay", isPublic: true, source: "app" },
-        ]},
-      ],
-    },
-  };
+  const getDateRange = useCallback(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayOfWeek = today.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const thisMonday = new Date(today);
+    thisMonday.setDate(today.getDate() + mondayOffset);
+    const thisSunday = new Date(thisMonday);
+    thisSunday.setDate(thisMonday.getDate() + 6);
+
+    switch (periodKey) {
+      case "thisWeek": return { from: thisMonday.toISOString(), to: new Date(thisSunday.getTime() + 86400000 - 1).toISOString() };
+      case "lastWeek": {
+        const lastMonday = new Date(thisMonday); lastMonday.setDate(thisMonday.getDate() - 7);
+        const lastSunday = new Date(lastMonday); lastSunday.setDate(lastMonday.getDate() + 6);
+        return { from: lastMonday.toISOString(), to: new Date(lastSunday.getTime() + 86400000 - 1).toISOString() };
+      }
+      case "thisMonth": {
+        const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        return { from: firstOfMonth.toISOString(), to: now.toISOString() };
+      }
+      case "last30": {
+        const d30 = new Date(today); d30.setDate(today.getDate() - 30);
+        return { from: d30.toISOString(), to: now.toISOString() };
+      }
+      case "custom": {
+        if (!customFrom || !customTo) return null;
+        return { from: new Date(customFrom + "T00:00:00").toISOString(), to: new Date(customTo + "T23:59:59").toISOString() };
+      }
+      default: return { from: thisMonday.toISOString(), to: new Date(thisSunday.getTime() + 86400000 - 1).toISOString() };
+    }
+  }, [periodKey, customFrom, customTo]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const range = getDateRange();
+    if (!range) return;
+    setLoading(true);
+    Promise.all([
+      fetchJournal({ userId, ...range }),
+      fetchEntriesFull({ userId, ...range }),
+    ])
+      .then(([journalData, fullData]) => {
+        setJournal(journalData);
+        setFullEntries(fullData);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [userId, periodKey, customFrom, customTo, getDateRange, dataVersion]);
+
+  const handleOpenArticle = useCallback((entryId) => {
+    const idx = fullEntries.findIndex((e) => e.id === entryId);
+    if (idx >= 0 && onOpenArticle) {
+      onOpenArticle(fullEntries[idx], fullEntries, idx);
+    }
+  }, [fullEntries, onOpenArticle]);
 
   const applyCustom = () => {
     if (!customFrom || !customTo) return;
@@ -729,27 +898,43 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
     setPickerOpen(false);
   };
 
-  const activePeriod = periodKey === "custom" ? {
-    title: "Custom Period",
-    sub: (() => {
-      if (!customFrom || !customTo) return "";
-      const f = new Date(customFrom + "T12:00:00");
-      const t = new Date(customTo + "T12:00:00");
-      const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-      return `${mo[f.getMonth()]} ${f.getDate()} – ${mo[t.getMonth()]} ${t.getDate()}, ${t.getFullYear()}`;
-    })(),
-    journal: journalPeriods.thisMonth.journal,
-  } : journalPeriods[periodKey];
+  const periodTitles = { thisWeek: "This Week", lastWeek: "Last Week", thisMonth: "This Month", last30: "Last 30 Days", custom: "Custom Period" };
+  const periodSubs = () => {
+    const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayOfWeek = today.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const thisMonday = new Date(today); thisMonday.setDate(today.getDate() + mondayOffset);
+    const thisSunday = new Date(thisMonday); thisSunday.setDate(thisMonday.getDate() + 6);
+    switch (periodKey) {
+      case "thisWeek": return `${mo[thisMonday.getMonth()]} ${thisMonday.getDate()} – ${thisSunday.getDate()}, ${thisMonday.getFullYear()}`;
+      case "lastWeek": { const lm = new Date(thisMonday); lm.setDate(thisMonday.getDate()-7); const ls = new Date(lm); ls.setDate(lm.getDate()+6); return `${mo[lm.getMonth()]} ${lm.getDate()} – ${ls.getDate()}, ${lm.getFullYear()}`; }
+      case "thisMonth": return `${mo[now.getMonth()]} ${now.getFullYear()}`;
+      case "last30": { const d = new Date(today); d.setDate(today.getDate()-30); return `${mo[d.getMonth()]} ${d.getDate()} – ${mo[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`; }
+      case "custom": return customFrom && customTo ? `${mo[new Date(customFrom+"T12:00:00").getMonth()]} ${new Date(customFrom+"T12:00:00").getDate()} – ${mo[new Date(customTo+"T12:00:00").getMonth()]} ${new Date(customTo+"T12:00:00").getDate()}, ${new Date(customTo+"T12:00:00").getFullYear()}` : "";
+      default: return "";
+    }
+  };
 
-  const currentJournal = activePeriod.journal;
+  const currentJournal = journal;
   const totalEntries = currentJournal.reduce((a, d) => a + d.entries.length, 0);
 
-  const presets = [
-    { key: "thisWeek", label: "This Week", sub: "Feb 9–15" },
-    { key: "lastWeek", label: "Last Week", sub: "Feb 2–8" },
-    { key: "thisMonth", label: "This Month", sub: "February" },
-    { key: "last30", label: "Last 30 Days", sub: "Jan 17 – Feb 15" },
-  ];
+  const presets = (() => {
+    const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dow = today.getDay(); const mOff = dow === 0 ? -6 : 1 - dow;
+    const tm = new Date(today); tm.setDate(today.getDate() + mOff);
+    const ts = new Date(tm); ts.setDate(tm.getDate() + 6);
+    const lm = new Date(tm); lm.setDate(tm.getDate() - 7);
+    const ls = new Date(lm); ls.setDate(lm.getDate() + 6);
+    return [
+      { key: "thisWeek", label: "This Week", sub: `${mo[tm.getMonth()]} ${tm.getDate()}–${ts.getDate()}` },
+      { key: "lastWeek", label: "Last Week", sub: `${mo[lm.getMonth()]} ${lm.getDate()}–${ls.getDate()}` },
+      { key: "thisMonth", label: "This Month", sub: mo[now.getMonth()] },
+      { key: "last30", label: "Last 30 Days", sub: (() => { const d = new Date(today); d.setDate(today.getDate()-30); return `${mo[d.getMonth()]} ${d.getDate()} – ${mo[now.getMonth()]} ${now.getDate()}`; })() },
+    ];
+  })();
 
   return (
     <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
@@ -760,7 +945,7 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
         {/* Period selector — title + calendar icon to the right */}
         <div style={{ position: "relative" }} ref={pickerRef}>
           <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, margin: 0 }}>
-            {activePeriod.title}
+            {periodTitles[periodKey] || "This Week"}
           </h2>
 
           {/* Calendar icon — absolute right */}
@@ -856,16 +1041,18 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
         </div>
 
         <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginTop: 4, marginBottom: 4 }}>
-          {activePeriod.sub}
+          {periodSubs()}
         </p>
         <p style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint, marginBottom: 20 }}>
-          {currentJournal.length} days · {totalEntries} {totalEntries === 1 ? "entry" : "entries"}
+          {loading ? "Loading..." : `${currentJournal.length} days · ${totalEntries} ${totalEntries === 1 ? "entry" : "entries"}`}
         </p>
         <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "0 auto 0" }} />
       </div>
 
+      {loading && <LoadingBlock C={C} text="Loading journal entries..." />}
+
       {/* Day by day timeline */}
-      {currentJournal.map((day, di) => (
+      {!loading && currentJournal.map((day, di) => (
         <div key={`${periodKey}-${di}`} style={{ marginBottom: 8 }}>
           {/* Day header */}
           <div style={{
@@ -880,10 +1067,11 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
 
           {/* Entries */}
           {day.entries.map((entry, ei) => (
-            <div key={ei} style={{
+            <div key={ei} onClick={() => handleOpenArticle(entry.id)} style={{
               padding: "24px 0",
               borderBottom: `1px solid ${C.rule}`,
               animation: `fadeInUp 0.4s ease ${(di * 0.1) + (ei * 0.05)}s both`,
+              cursor: "pointer",
             }}>
               {/* Entry meta row */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
@@ -924,10 +1112,10 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
       ))}
 
       {/* End of journal */}
-      <div style={{ textAlign: "center", padding: "40px 0 60px" }}>
+      {!loading && <div style={{ textAlign: "center", padding: "40px 0 60px" }}>
         <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "0 auto 20px" }} />
         <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>
-          End of {activePeriod.title.toLowerCase()} entries
+          End of {(periodTitles[periodKey] || "this week").toLowerCase()} entries
         </p>
         <button onClick={onSwitchToEdition} style={{
           fontFamily: F.sans, fontSize: 11, fontWeight: 500,
@@ -936,7 +1124,7 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
         }}>
           View Weekly Edition →
         </button>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -944,27 +1132,28 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
 // ============================================================
 // ARCHIVES VIEW — Past editions as a grid of "covers"
 // ============================================================
-function ArchivesView({ C }) {
-  const editions = [
-    { num: "No. 47", week: "Feb 9–15", headline: "After Three Years of Doubt, She Finally Made the Leap", entries: 7, words: 4280, mood: "⚡" },
-    { num: "No. 46", week: "Feb 2–8", headline: "The Art of Staying When Everything Says Go", entries: 5, words: 3100, mood: "🌧" },
-    { num: "No. 45", week: "Jan 26–Feb 1", headline: "January Came and Went Like a Long Exhale", entries: 8, words: 5200, mood: "🌤" },
-    { num: "No. 44", week: "Jan 19–25", headline: "On Ambition, Mushroom Risotto, and Letting Things Be", entries: 6, words: 3900, mood: "☀️" },
-    { num: "No. 43", week: "Jan 12–18", headline: "A Quiet Week in a Loud City", entries: 4, words: 2100, mood: "🌙" },
-    { num: "No. 42", week: "Jan 5–11", headline: "New Year, Same Questions, Better Answers", entries: 9, words: 6100, mood: "☀️" },
-    { num: "No. 41", week: "Dec 29–Jan 4", headline: "The Year That Changed Everything (And the One That Might)", entries: 11, words: 7800, mood: "⚡" },
-    { num: "No. 40", week: "Dec 22–28", headline: "Christmas Without the Script", entries: 5, words: 3400, mood: "🌤" },
-    { num: "No. 39", week: "Dec 15–21", headline: "She Stopped Running and Looked Around", entries: 6, words: 4000, mood: "🌙" },
-  ];
+function ArchivesView({ C, userId }) {
+  const [editions, setEditions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchAllEditions(userId)
+      .then(setEditions)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [userId]);
 
   return (
     <div style={{ maxWidth: 820, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
       <div style={{ padding: "40px 0 32px", textAlign: "center" }}>
         <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Archives</div>
         <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 6 }}>Past Editions</h2>
-        <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>47 weeks of your life, published</p>
+        <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>{editions.length} weeks of your life, published</p>
         <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "16px auto 0" }} />
       </div>
+
+      {loading && <LoadingBlock C={C} text="Loading archives..." />}
 
       {/* Year filter */}
       <div style={{ display: "flex", justifyContent: "center", gap: 0, marginBottom: 32 }}>
@@ -980,7 +1169,7 @@ function ArchivesView({ C }) {
       </div>
 
       {/* Edition grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 60 }}>
+      {!loading && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 60 }}>
         {editions.map((ed, i) => (
           <div key={i} style={{
             border: `1px solid ${C.rule}`, cursor: "pointer",
@@ -1008,7 +1197,7 @@ function ArchivesView({ C }) {
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -1016,63 +1205,42 @@ function ArchivesView({ C }) {
 // ============================================================
 // SECTIONS VIEW — NYT alternating layout
 // ============================================================
-function SectionsView({ C }) {
-  const sections = [
-    {
-      name: "Personal Essays", count: 12, words: "18.4k",
-      entries: [
-        { headline: "After Three Years of Doubt, She Finally Made the Leap", sub: "A reflection on leaving the comfort of corporate life to pursue something that felt terrifyingly right.", time: "8 min read" },
-        { headline: "The Art of Staying When Everything Says Go", sub: "On the quiet courage of choosing not to leave.", time: "6 min read" },
-        { headline: "On Ambition, Mushroom Risotto, and Letting Things Be", sub: "What cooking taught me about surrender.", time: "5 min read" },
-      ],
-      themes: ["Career transitions", "Self-permission", "Identity"],
-    },
-    {
-      name: "Dispatches", count: 23, words: "8.9k",
-      entries: [
-        { headline: "A Week of Small Victories and One Spectacular Failure", sub: "Monday's breakthrough was almost enough to make up for Thursday's kitchen disaster.", time: "5 min read" },
-        { headline: "Nothing Extraordinary. Sometimes That's the Point.", sub: "An ode to the unremarkable Wednesday.", time: "3 min read" },
-        { headline: "Golden Hour From the Apartment", sub: "Twelve photos. One keeper.", time: "2 min read" },
-      ],
-      themes: ["Daily observations", "Food", "São Paulo"],
-    },
-    {
-      name: "Letters to Self", count: 7, words: "5.6k",
-      entries: [
-        { headline: "Dear Future Me: Don't Forget How This Felt", sub: "A letter written on the day everything changed.", time: "4 min read" },
-        { headline: "A Note on What You Deserve", sub: "You keep forgetting. So here it is, in writing.", time: "3 min read" },
-        { headline: "To the Version of Me Who's Still Afraid", sub: "She's doing fine. You should know that.", time: "3 min read" },
-      ],
-      themes: ["Future self", "Compassion", "Fear"],
-    },
-    {
-      name: "Reviews", count: 5, words: "4.2k",
-      entries: [
-        { headline: "Clarice Lispector's 'A Hora da Estrela'", sub: "Every sentence feels like she's writing directly to me, across decades.", time: "6 min read" },
-        { headline: "The Playlist That Got Me Through January", sub: "Thirty-one days, forty-four songs, one recurring theme.", time: "3 min read" },
-        { headline: "That Restaurant on Augusta", sub: "The pasta was fine. The conversation was not.", time: "4 min read" },
-      ],
-      themes: ["Literature", "Music", "Food"],
-    },
-    {
-      name: "Photo Essays", count: 3, words: "1.2k",
-      entries: [
-        { headline: "Golden Hour Series", sub: "São Paulo at 5pm, when the city forgives itself.", time: "2 min read" },
-        { headline: "The Walk to the Pharmacy", sub: "A three-block journey in twelve frames.", time: "2 min read" },
-      ],
-      themes: ["Light", "Urban", "Quiet moments"],
-    },
-  ];
+function SectionsView({ C, userId, onOpenArticle }) {
+  const [sections, setSections] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchSections(userId)
+      .then(setSections)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [userId]);
+
+  const handleOpenEntry = useCallback(async (entryId) => {
+    if (!onOpenArticle || !userId) return;
+    try {
+      const entries = await fetchEntriesFull({ userId });
+      const idx = entries.findIndex((e) => e.id === entryId);
+      if (idx >= 0) onOpenArticle(entries[idx], entries, idx);
+    } catch (err) {
+      console.error("Failed to load article:", err);
+    }
+  }, [onOpenArticle, userId]);
+
+  const totalEntries = sections.reduce((s, sec) => s + sec.count, 0);
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
       <div style={{ padding: "40px 0 20px", textAlign: "center" }}>
         <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Sections</div>
         <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 6 }}>Your Newsroom</h2>
-        <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>50 entries across 5 desks</p>
+        <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>{totalEntries} entries across {sections.length} desks</p>
       </div>
 
-      {sections.map((sec, si) => {
+      {loading && <LoadingBlock C={C} text="Loading sections..." />}
+
+      {!loading && sections.map((sec, si) => {
         const flip = si % 2 === 1;
         return (
           <div key={si} style={{ animation: `fadeInUp 0.4s ease ${si * 0.08}s both` }}>
@@ -1101,7 +1269,7 @@ function SectionsView({ C }) {
               {/* Entries stack */}
               <div style={{ order: flip ? 2 : 1 }}>
                 {sec.entries.map((entry, ei) => (
-                  <div key={ei} style={{
+                  <div key={ei} onClick={() => handleOpenEntry(entry.id)} style={{
                     paddingBottom: 14, marginBottom: 14,
                     borderBottom: ei < sec.entries.length - 1 ? `1px solid ${C.rule}` : "none",
                     cursor: "pointer",
@@ -1146,7 +1314,7 @@ function SectionsView({ C }) {
 // ============================================================
 // REFLECTIONS VIEW — NYT distributed grid layout
 // ============================================================
-function ReflectionsView({ C }) {
+function ReflectionsView({ C, userId }) {
   const [period, setPeriod] = useState("week");
   const [askQuery, setAskQuery] = useState("");
   const [askAnswer, setAskAnswer] = useState(null);
@@ -1156,6 +1324,17 @@ function ReflectionsView({ C }) {
   const [customTo, setCustomTo] = useState("2026-02-15");
   const [customApplied, setCustomApplied] = useState(false);
   const datePickerRef = useRef(null);
+  const [periodsData, setPeriodsData] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    setLoading(true);
+    fetchAllReflections(userId)
+      .then(setPeriodsData)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [userId]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -1182,140 +1361,38 @@ function ReflectionsView({ C }) {
     return Math.max(1, Math.round((t - f) / (1000 * 60 * 60 * 24)));
   };
 
-  const periods = {
-    week: {
-      label: "This Week", date: "Feb 9–15, 2026",
-      moods: [{ day:"Mon",val:4,emoji:"☀️"},{day:"Tue",val:3,emoji:"🌤"},{day:"Wed",val:3,emoji:"🌤"},{day:"Thu",val:5,emoji:"⚡"},{day:"Fri",val:4,emoji:"☀️"},{day:"Sat",val:2,emoji:"🌙"},{day:"Sun",val:5,emoji:"⚡"}],
-      trend: [{w:"W42",v:2.8},{w:"W43",v:3.1},{w:"W44",v:3.5},{w:"W45",v:3.2},{w:"W46",v:2.9},{w:"W47",v:4.1}],
-      trendLabel: "6-Week Trend", moodHint: "Optimism at a 3-month high",
-      reflectionTitle: "This Week's Reflection",
-      reflection: [
-        "This was a week of inflection. You wrote seven entries across seven days — your most consistent week since October. But the shift wasn't just in quantity. Your language changed. Early in the week, you observed. By Sunday, you declared.",
-        "The recurring word was <em>permission</em> — sometimes spoken, sometimes implied. You gave yourself permission to leave, to feel jealous, to eat bad stroganoff standing up, to keep only one photo out of twelve.",
-        "Something is changing. The question is whether you know what it is yet.",
-      ],
-      connections: [
-        "You mention Marina in 8 entries, always when something in your own life is shifting. She might be your mirror for change.",
-        "Your best writing happens between 10PM and midnight. 73% of your personal essays were written after dark.",
-        "Entries via Telegram are 40% shorter but higher in emotional intensity. Quick thoughts carry more weight than you think.",
-        "Every time you mention cooking, the next day's entry is more reflective. Food unlocks introspection.",
-      ],
-      themes: [{theme:"Permission",count:14,trend:"↑"},{theme:"Marina",count:8,trend:"—"},{theme:"Food as metaphor",count:11,trend:"↑"},{theme:"Light & photography",count:9,trend:"—"},{theme:"Clarice Lispector",count:5,trend:"↑"}],
-      questions: [
-        "When did the math change — the cost of staying vs. leaving?",
-        "Marina is moving to Lisbon. You felt jealousy and relief. Which surprised you more?",
-        "You kept one photo out of twelve. What made that one feel true?",
-        "You've mentioned permission 14 times. Who were you asking?",
-      ],
-      stats: [{label:"Entries",value:"7"},{label:"Words",value:"4,280"},{label:"Streak",value:"12 days"},{label:"Avg. per entry",value:"611"},{label:"Via Telegram",value:"3"},{label:"Public",value:"2"}],
-    },
-    month: {
-      label: "This Month", date: "February 2026",
-      moods: [{day:"W1",val:3,emoji:"🌤"},{day:"W2",val:4,emoji:"⚡"},{day:"W3",val:4,emoji:"☀️"},{day:"W4",val:5,emoji:"⚡"}],
-      trend: [{w:"Sep",v:2.5},{w:"Oct",v:3.0},{w:"Nov",v:2.3},{w:"Dec",v:2.8},{w:"Jan",v:3.4},{w:"Feb",v:4.1}],
-      trendLabel: "6-Month Trend", moodHint: "February is your brightest month yet",
-      reflectionTitle: "February So Far",
-      reflection: [
-        "February opened with momentum and hasn't let up. You've written 14 entries in 15 days — a pace you haven't hit since the first month on the platform. The quality has shifted too: your sentences are getting shorter, more decisive.",
-        "The theme of the month is action. January was full of 'what if' and 'maybe.' February replaced those with 'I did' and 'I will.' The resignation on Feb 15 wasn't impulsive — it was the culmination of 47 days of quiet preparation.",
-        "You're also writing more publicly. Four entries went public this month, compared to one in all of January. You're ready to be seen.",
-      ],
-      connections: [
-        "Your February entries reference January entries 6 times — you're in active dialogue with your past self.",
-        "Public entries are 30% longer than private ones. Visibility makes you more deliberate.",
-        "Every Letter to Self this month was written before 8 AM. Your mornings belong to introspection.",
-        "The word 'finally' appears 9 times this month. Zero times in January.",
-      ],
-      themes: [{theme:"Action",count:18,trend:"↑"},{theme:"Permission",count:14,trend:"↑"},{theme:"Visibility",count:9,trend:"↑"},{theme:"Marina",count:5,trend:"—"},{theme:"Clarice",count:5,trend:"↑"}],
-      questions: [
-        "Your writing pace doubled. What changed — discipline or urgency?",
-        "You went public 4 times. What made those entries feel ready?",
-        "January's 'what if' became February's 'I did.' Was there a single moment?",
-        "You write Letters to Self only in the morning now. Why?",
-      ],
-      stats: [{label:"Entries",value:"14"},{label:"Words",value:"9,640"},{label:"Streak",value:"12 days"},{label:"Avg. per entry",value:"689"},{label:"Via Telegram",value:"5"},{label:"Public",value:"4"}],
-    },
-    quarter: {
-      label: "3 Months", date: "Dec 2025 – Feb 2026",
-      moods: [{day:"Dec",val:2,emoji:"🌧"},{day:"Jan W1",val:2,emoji:"🌙"},{day:"Jan W3",val:3,emoji:"🌤"},{day:"Feb W1",val:4,emoji:"☀️"},{day:"Feb W2",val:5,emoji:"⚡"}],
-      trend: [{w:"Q1'25",v:3.0},{w:"Q2'25",v:2.6},{w:"Q3'25",v:2.9},{w:"Q4'25",v:2.5},{w:"Q1'26",v:3.8}],
-      trendLabel: "Quarterly Trend", moodHint: "Clear upward arc from December's low",
-      reflectionTitle: "The Last Three Months",
-      reflection: [
-        "The arc of the last three months is unmistakable: December was grief, January was restlessness, February is action. You processed a loss, sat with uncertainty, and then — without fanfare — started moving.",
-        "You wrote 142 entries across 13 weeks. The density of personal essays doubled from December to February. Your dispatches got shorter but your essays got deeper. The ratio shifted from observation to reflection.",
-        "The most striking change: your relationship with your own voice. In December you wrote 'I think' 34 times. In February, just 6. You stopped hedging.",
-      ],
-      connections: [
-        "December's grief entries and February's action entries share the same vocabulary — transformation repurposed the language of loss.",
-        "Your longest writing streaks correlate with periods of professional uncertainty. Writing is your stabilizer.",
-        "Marina appears more in transition months. She was absent in your most stable weeks.",
-        "Your reading habits (Clarice, Lispector) preceded your bravest writing by exactly one week.",
-      ],
-      themes: [{theme:"Identity",count:34,trend:"↑"},{theme:"Career",count:28,trend:"↑"},{theme:"Permission",count:22,trend:"↑"},{theme:"Grief → Action",count:18,trend:"↑"},{theme:"Marina",count:15,trend:"—"}],
-      questions: [
-        "December's grief — have you finished processing it, or just redirected it?",
-        "Your hedging dropped 80%. Is that confidence or urgency?",
-        "You read Clarice before your bravest writing. Coincidence or ritual?",
-        "Three months ago you were still. Now you're running. Toward what?",
-      ],
-      stats: [{label:"Entries",value:"142"},{label:"Words",value:"38,400"},{label:"Best streak",value:"12 days"},{label:"Avg. per entry",value:"270"},{label:"Personal Essays",value:"24"},{label:"Public",value:"11"}],
-    },
-    all: {
-      label: "All Time", date: "47 editions · 1 year",
-      moods: [{day:"Q1",val:3,emoji:"🌤"},{day:"Q2",val:2,emoji:"🌧"},{day:"Q3",val:3,emoji:"🌤"},{day:"Q4",val:4,emoji:"⚡"}],
-      trend: [{w:"Mar",v:3.2},{w:"May",v:2.8},{w:"Jul",v:2.4},{w:"Sep",v:2.9},{w:"Nov",v:2.3},{w:"Jan",v:3.4},{w:"Feb",v:4.1}],
-      trendLabel: "12-Month Trend", moodHint: "Your brightest period since you started",
-      reflectionTitle: "One Year of Writing",
-      reflection: [
-        "Forty-seven editions. Eight hundred and forty-seven entries. One year of your inner life, captured in words.",
-        "The through-line is unmistakable: a woman learning, slowly and sometimes painfully, to trust her own judgment. The early editions are full of questions. The recent ones are full of answers disguised as questions.",
-        "You started The Deborah Times as an experiment. It became a practice. And somewhere around edition 30, it became a mirror you couldn't look away from. The writing changed you — not the other way around.",
-      ],
-      connections: [
-        "Your vocabulary has expanded 40% since edition 1. You found new words for old feelings.",
-        "The topics you avoid are as revealing as the ones you pursue. You've never written about your parents.",
-        "Your most-referenced entry is from edition 12: 'The Morning I Decided to Stay.' You've linked back to it 7 times.",
-        "Seasons affect your writing more than events. Fall is grief, winter is stillness, spring is action.",
-      ],
-      themes: [{theme:"Self-trust",count:67,trend:"↑"},{theme:"Career transitions",count:45,trend:"↑"},{theme:"Food & cooking",count:42,trend:"—"},{theme:"Photography & light",count:38,trend:"—"},{theme:"Marina",count:23,trend:"—"}],
-      questions: [
-        "You've been writing for a year. Who were you in edition 1?",
-        "The topics you avoid — are you ready to go there?",
-        "Your writing changed you. When did you first notice?",
-        "Forty-seven editions from now, what do you hope to read?",
-      ],
-      stats: [{label:"Entries",value:"847"},{label:"Words",value:"198,000"},{label:"Editions",value:"47"},{label:"Avg. per week",value:"18"},{label:"Personal Essays",value:"89"},{label:"Public",value:"34"}],
-    },
-    custom: {
-      label: "Custom", date: formatDateLabel(customFrom, customTo),
-      moods: [{day:"W1",val:2,emoji:"🌧"},{day:"W2",val:2,emoji:"🌙"},{day:"W3",val:3,emoji:"🌤"},{day:"W4",val:3,emoji:"🌤"},{day:"W5",val:4,emoji:"☀️"},{day:"W6",val:4,emoji:"☀️"},{day:"W7",val:5,emoji:"⚡"}],
-      trend: [{w:"Start",v:2.2},{w:"",v:2.5},{w:"",v:2.8},{w:"",v:3.1},{w:"",v:3.5},{w:"End",v:4.1}],
-      trendLabel: `${daysBetween(customFrom, customTo)}-Day Trend`, moodHint: "A clear arc of growth across your selected period",
-      reflectionTitle: "Your Custom Period",
-      reflection: [
-        `Across this ${daysBetween(customFrom, customTo)}-day window, your writing tells a story of transformation. The early entries are cautious and observational — you were still finding your footing. By the midpoint, something shifted. The sentences got shorter. The certainty grew.`,
-        "The most striking pattern in this range: your relationship with doubt changed. Early on, doubt was a barrier. Later, it became a companion — something you acknowledged and walked alongside rather than fought against.",
-        "Your AI editor noticed a vocabulary shift of 23% between the first and last weeks of this range. New words for old feelings. That's growth you can measure.",
-      ],
-      connections: [
-        "The first third of this range contains 60% of your 'I think' statements. The last third has almost none.",
-        "Your longest entries cluster in the middle of this period — the transition zone between hesitation and decision.",
-        "Telegram entries increased by 45% in the second half. You started trusting quick thoughts more.",
-        "The themes that opened this period are different from the ones that closed it. You arrived somewhere new.",
-      ],
-      themes: [{theme:"Transformation",count:28,trend:"↑"},{theme:"Self-trust",count:22,trend:"↑"},{theme:"Permission",count:18,trend:"↑"},{theme:"Career",count:15,trend:"↑"},{theme:"Relationships",count:12,trend:"—"}],
-      questions: [
-        "What made you choose this specific time range? What were you looking for?",
-        "The person who wrote the first entry in this range — would she recognize the person who wrote the last?",
-        "Your vocabulary changed 23%. What new words did you find, and what did they replace?",
-        "If this period were a chapter, what would you title it?",
-      ],
-      stats: [{label:"Entries",value:String(Math.round(daysBetween(customFrom, customTo) * 0.65))},{label:"Words",value:String((Math.round(daysBetween(customFrom, customTo) * 180)).toLocaleString())},{label:"Days",value:String(daysBetween(customFrom, customTo))},{label:"Avg. per entry",value:"277"},{label:"Personal Essays",value:String(Math.round(daysBetween(customFrom, customTo) * 0.12))},{label:"Public",value:String(Math.round(daysBetween(customFrom, customTo) * 0.06))}],
-    },
+  // Custom period placeholder (when no DB reflection exists)
+  const customPeriod = {
+    label: "Custom", date: formatDateLabel(customFrom, customTo),
+    moods: [{day:"W1",val:2,emoji:"🌧"},{day:"W2",val:2,emoji:"🌙"},{day:"W3",val:3,emoji:"🌤"},{day:"W4",val:3,emoji:"🌤"},{day:"W5",val:4,emoji:"☀️"},{day:"W6",val:4,emoji:"☀️"},{day:"W7",val:5,emoji:"⚡"}],
+    trend: [{w:"Start",v:2.2},{w:"",v:2.5},{w:"",v:2.8},{w:"",v:3.1},{w:"",v:3.5},{w:"End",v:4.1}],
+    trendLabel: `${daysBetween(customFrom, customTo)}-Day Trend`, moodHint: "A clear arc of growth across your selected period",
+    reflectionTitle: "Your Custom Period",
+    reflection: [
+      `Across this ${daysBetween(customFrom, customTo)}-day window, your writing tells a story of transformation. The early entries are cautious and observational — you were still finding your footing. By the midpoint, something shifted. The sentences got shorter. The certainty grew.`,
+      "The most striking pattern in this range: your relationship with doubt changed. Early on, doubt was a barrier. Later, it became a companion — something you acknowledged and walked alongside rather than fought against.",
+      "Your AI editor noticed a vocabulary shift of 23% between the first and last weeks of this range. New words for old feelings. That's growth you can measure.",
+    ],
+    connections: [
+      "The first third of this range contains 60% of your 'I think' statements. The last third has almost none.",
+      "Your longest entries cluster in the middle of this period — the transition zone between hesitation and decision.",
+      "Telegram entries increased by 45% in the second half. You started trusting quick thoughts more.",
+      "The themes that opened this period are different from the ones that closed it. You arrived somewhere new.",
+    ],
+    themes: [{theme:"Transformation",count:28,trend:"↑"},{theme:"Self-trust",count:22,trend:"↑"},{theme:"Permission",count:18,trend:"↑"},{theme:"Career",count:15,trend:"↑"},{theme:"Relationships",count:12,trend:"—"}],
+    questions: [
+      "What made you choose this specific time range? What were you looking for?",
+      "The person who wrote the first entry in this range — would she recognize the person who wrote the last?",
+      "Your vocabulary changed 23%. What new words did you find, and what did they replace?",
+      "If this period were a chapter, what would you title it?",
+    ],
+    stats: [{label:"Entries",value:String(Math.round(daysBetween(customFrom, customTo) * 0.65))},{label:"Words",value:String((Math.round(daysBetween(customFrom, customTo) * 180)).toLocaleString())},{label:"Days",value:String(daysBetween(customFrom, customTo))},{label:"Avg. per entry",value:"277"},{label:"Personal Essays",value:String(Math.round(daysBetween(customFrom, customTo) * 0.12))},{label:"Public",value:String(Math.round(daysBetween(customFrom, customTo) * 0.06))}],
   };
 
-  const P = periods[period];
+  const P = period === "custom" ? customPeriod : periodsData[period];
+
+  if (loading) return <LoadingBlock C={C} text="Loading reflections..." />;
+  if (!P) return <LoadingBlock C={C} text="No reflection data for this period" />;
 
   const handleAsk = () => {
     if (!askQuery.trim()) return;
@@ -1720,6 +1797,574 @@ function EditionSwitcher({ C }) {
 }
 
 // ============================================================
+// ADMIN PROMPTS PAGE — Master user only
+// ============================================================
+function AdminPromptsPage({ C, onClose }) {
+  const [prompts, setPrompts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+
+  useEffect(() => {
+    fetchPrompts()
+      .then(setPrompts)
+      .catch((err) => console.error("Failed to load prompts:", err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const startEdit = (prompt) => {
+    setEditingId(prompt.id);
+    setEditForm({
+      system_prompt: prompt.system_prompt,
+      model: prompt.model,
+      temperature: prompt.temperature,
+      max_tokens: prompt.max_tokens,
+    });
+    setSaveMsg(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditForm({});
+    setSaveMsg(null);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const updated = await updatePrompt(editingId, {
+        system_prompt: editForm.system_prompt,
+        model: editForm.model,
+        temperature: parseFloat(editForm.temperature),
+        max_tokens: parseInt(editForm.max_tokens, 10),
+      });
+      setPrompts((prev) => prev.map((p) => (p.id === editingId ? updated : p)));
+      setEditingId(null);
+      setSaveMsg("Saved successfully.");
+      setTimeout(() => setSaveMsg(null), 3000);
+    } catch (err) {
+      console.error("Failed to save prompt:", err);
+      setSaveMsg("Error saving. Check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 2000,
+      backgroundColor: C.bg, display: "flex", flexDirection: "column",
+      animation: "editorSlideIn 0.35s ease",
+    }}>
+      {/* Header */}
+      <div style={{
+        borderBottom: `1px solid ${C.rule}`, padding: "0 32px", height: 56,
+        display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={onClose} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            background: "none", border: "none", cursor: "pointer",
+            fontFamily: F.sans, fontSize: 12, color: C.inkMuted,
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+            Back
+          </button>
+          <div style={{ width: 1, height: 20, backgroundColor: C.rule }} />
+          <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>ADMIN</span>
+        </div>
+        {saveMsg && <span style={{ fontFamily: F.sans, fontSize: 11, color: saveMsg.includes("Error") ? "#c41e1e" : C.accent }}>{saveMsg}</span>}
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflow: "auto", padding: "32px" }}>
+        <div style={{ maxWidth: 800, margin: "0 auto" }}>
+          <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>AI Prompts</h1>
+          <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 32 }}>
+            Manage the system prompts used by the AI Editor. Changes take effect immediately.
+          </p>
+
+          {loading && <LoadingBlock C={C} text="Loading prompts..." />}
+
+          {!loading && prompts.map((prompt) => (
+            <div key={prompt.id} style={{
+              border: `1px solid ${editingId === prompt.id ? C.accent : C.rule}`,
+              marginBottom: 16, transition: "border-color 0.2s",
+            }}>
+              {/* Prompt header */}
+              <div style={{
+                padding: "16px 20px",
+                backgroundColor: editingId === prompt.id ? C.accentBg : C.sectionBg,
+                borderBottom: `1px solid ${C.rule}`,
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}>
+                <div>
+                  <div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 600, color: C.ink }}>{prompt.label}</div>
+                  <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginTop: 2 }}>{prompt.description}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{prompt.id}</span>
+                  {editingId !== prompt.id ? (
+                    <button onClick={() => startEdit(prompt)} style={{
+                      fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                      color: C.bg, backgroundColor: C.ink, border: "none",
+                      padding: "5px 14px", cursor: "pointer",
+                    }}>Edit</button>
+                  ) : (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={handleSave} disabled={saving} style={{
+                        fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                        color: C.bg, backgroundColor: C.accent, border: "none",
+                        padding: "5px 14px", cursor: saving ? "default" : "pointer",
+                        opacity: saving ? 0.7 : 1,
+                      }}>{saving ? "Saving..." : "Save"}</button>
+                      <button onClick={cancelEdit} style={{
+                        fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+                        background: "none", border: `1px solid ${C.rule}`,
+                        padding: "5px 14px", cursor: "pointer",
+                      }}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Prompt body */}
+              <div style={{ padding: "16px 20px" }}>
+                {editingId === prompt.id ? (
+                  <>
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>System Prompt</label>
+                      <textarea
+                        value={editForm.system_prompt}
+                        onChange={(e) => setEditForm({ ...editForm, system_prompt: e.target.value })}
+                        style={{
+                          width: "100%", minHeight: 200, padding: "12px",
+                          fontFamily: F.mono, fontSize: 12, lineHeight: 1.6,
+                          color: C.ink, backgroundColor: C.sectionBg,
+                          border: `1px solid ${C.rule}`, outline: "none", resize: "vertical",
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                      <div>
+                        <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Model</label>
+                        <input
+                          value={editForm.model}
+                          onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
+                          style={{
+                            width: "100%", padding: "8px 10px",
+                            fontFamily: F.mono, fontSize: 12, color: C.ink,
+                            backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Temperature</label>
+                        <input
+                          type="number" step="0.1" min="0" max="2"
+                          value={editForm.temperature}
+                          onChange={(e) => setEditForm({ ...editForm, temperature: e.target.value })}
+                          style={{
+                            width: "100%", padding: "8px 10px",
+                            fontFamily: F.mono, fontSize: 12, color: C.ink,
+                            backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Max Tokens</label>
+                        <input
+                          type="number" step="100" min="100" max="8000"
+                          value={editForm.max_tokens}
+                          onChange={(e) => setEditForm({ ...editForm, max_tokens: e.target.value })}
+                          style={{
+                            width: "100%", padding: "8px 10px",
+                            fontFamily: F.mono, fontSize: 12, color: C.ink,
+                            backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <pre style={{
+                      fontFamily: F.mono, fontSize: 11, lineHeight: 1.6,
+                      color: C.inkLight, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                      maxHeight: 120, overflow: "hidden", marginBottom: 10,
+                    }}>{prompt.system_prompt}</pre>
+                    <div style={{ display: "flex", gap: 16 }}>
+                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>model: {prompt.model}</span>
+                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>temp: {prompt.temperature}</span>
+                      <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>max_tokens: {prompt.max_tokens}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ARTICLE VIEW — Full-screen reading experience
+// ============================================================
+function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, siblingEntries, onNavigateToEntry }) {
+  const [showOriginal, setShowOriginal] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    setShowOriginal(false);
+  }, [entry?.id]);
+
+  useEffect(() => {
+    const handleEsc = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleEsc);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleEsc);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  if (!entry) return null;
+
+  const SECTION_MAP = {
+    dispatch: "Dispatch", essay: "Personal Essay", letter: "Letter to Self",
+    review: "Review", photo: "Photo Essay",
+  };
+  const MOOD_MAP = [
+    { emoji: "☀️", label: "Bright" }, { emoji: "🌤", label: "Calm" },
+    { emoji: "🌧", label: "Heavy" }, { emoji: "⚡", label: "Electric" },
+    { emoji: "🌙", label: "Reflective" },
+  ];
+  const SOURCE_MAP = { app: "App", telegram: "Telegram", whatsapp: "WhatsApp", api: "API" };
+
+  const readTime = Math.max(1, Math.ceil((entry.word_count || 0) / 230));
+  const hasAiEdit = entry.ai_edit?.applied;
+  const showAiVersion = hasAiEdit && isProUser && !showOriginal;
+
+  const headline = showAiVersion && entry.ai_edit.headline
+    ? entry.ai_edit.headline
+    : entry.title;
+  const subhead = showAiVersion && entry.ai_edit.subhead
+    ? entry.ai_edit.subhead
+    : null;
+  const bodyText = showAiVersion
+    ? entry.ai_edit.edited_body
+    : entry.body;
+  const paragraphs = (bodyText || "").split("\n\n").filter(Boolean);
+
+  const useDropCap = showAiVersion && entry.ai_edit?.mode === "rewrite";
+
+  const photo = (entry.attachments || []).find((a) => a.type === "photo");
+
+  const createdDate = new Date(entry.created_at);
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const dateStr = `${months[createdDate.getMonth()]} ${createdDate.getDate()}, ${createdDate.getFullYear()}`;
+
+  const metaParts = [
+    dateStr,
+    `${readTime} min read`,
+    `via ${SOURCE_MAP[entry.source] || entry.source}`,
+  ];
+  if (entry.mood != null && MOOD_MAP[entry.mood]) {
+    metaParts.push(MOOD_MAP[entry.mood].emoji);
+  }
+
+  const edCtx = entry.edition || edition;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 2000,
+      backgroundColor: C.bg, display: "flex", flexDirection: "column",
+      animation: "editorSlideIn 0.35s ease",
+    }}>
+      {/* HEADER BAR */}
+      <div style={{
+        borderBottom: `1px solid ${C.rule}`, padding: "0 32px", height: 56,
+        display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0,
+      }}>
+        <button onClick={onClose} style={{
+          display: "flex", alignItems: "center", gap: 6,
+          background: "none", border: "none", cursor: "pointer",
+          fontFamily: F.sans, fontSize: 12, color: C.inkMuted,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+          Back
+        </button>
+        <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, letterSpacing: "0.5px" }}>
+          {edCtx ? `Vol. ${edCtx.volume} · No. ${edCtx.number || edCtx.num}` : "My Journal"}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {entry.is_public ? (
+            <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg>
+              Public
+            </span>
+          ) : (
+            <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+              Private
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* SCROLLABLE BODY */}
+      <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "48px 24px 80px" }}>
+          {/* Section label */}
+          <div style={{
+            fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent,
+            textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16,
+          }}>
+            {SECTION_MAP[entry.section] || entry.section}
+          </div>
+
+          {/* Headline */}
+          {headline && (
+            <h1 style={{
+              fontFamily: F.display, fontSize: 36, fontWeight: 700,
+              lineHeight: 1.15, color: C.ink, marginBottom: subhead ? 12 : 16,
+            }}>
+              {headline}
+            </h1>
+          )}
+
+          {/* Subhead */}
+          {subhead && (
+            <p style={{
+              fontFamily: F.body, fontSize: 17, fontStyle: "italic",
+              color: C.inkLight, lineHeight: 1.5, marginBottom: 16,
+            }}>
+              {subhead}
+            </p>
+          )}
+
+          {/* Divider */}
+          <div style={{ height: 2, backgroundColor: C.ink, width: 60, marginBottom: 16 }} />
+
+          {/* Meta row */}
+          <div style={{
+            fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+            marginBottom: hasAiEdit ? 8 : 32,
+            display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+          }}>
+            {metaParts.map((part, i) => (
+              <span key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {i > 0 && <span style={{ color: C.rule }}>·</span>}
+                {part}
+              </span>
+            ))}
+          </div>
+
+          {/* AI badge */}
+          {hasAiEdit && (
+            <div style={{
+              fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent,
+              marginBottom: 32,
+            }}>
+              ✦ AI · {entry.ai_edit.tone || entry.ai_edit.mode}
+            </div>
+          )}
+
+          {/* Photo */}
+          {photo && (
+            <div style={{ marginBottom: 32 }}>
+              <div style={{
+                width: "100%", height: 400, backgroundColor: C.sectionBg,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                overflow: "hidden",
+              }}>
+                {photo.url ? (
+                  <img src={photo.url} alt={photo.metadata?.caption || ""}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+                  </svg>
+                )}
+              </div>
+              {photo.metadata?.caption && (
+                <p style={{
+                  fontFamily: F.body, fontSize: 11, fontStyle: "italic",
+                  color: C.inkMuted, marginTop: 8,
+                }}>
+                  {photo.metadata.caption}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Toggle Original/Edited */}
+          {hasAiEdit && isProUser && (
+            <div style={{
+              display: "flex", justifyContent: "flex-end", marginBottom: 20, gap: 0,
+            }}>
+              <button onClick={() => setShowOriginal(false)} style={{
+                fontFamily: F.sans, fontSize: 10, fontWeight: showOriginal ? 400 : 600,
+                color: showOriginal ? C.inkMuted : C.ink,
+                backgroundColor: showOriginal ? "transparent" : C.sectionBg,
+                border: `1px solid ${C.rule}`, padding: "5px 14px",
+                cursor: "pointer", borderRight: "none",
+              }}>Edited</button>
+              <button onClick={() => setShowOriginal(true)} style={{
+                fontFamily: F.sans, fontSize: 10, fontWeight: showOriginal ? 600 : 400,
+                color: showOriginal ? C.ink : C.inkMuted,
+                backgroundColor: showOriginal ? C.sectionBg : "transparent",
+                border: `1px solid ${C.rule}`, padding: "5px 14px",
+                cursor: "pointer",
+              }}>Original</button>
+            </div>
+          )}
+
+          {/* Original text notice */}
+          {showOriginal && (
+            <p style={{
+              fontFamily: F.body, fontSize: 12, fontStyle: "italic",
+              color: C.inkFaint, marginBottom: 20,
+              animation: "fadeIn 0.3s ease",
+            }}>
+              This is your original text, before AI editing.
+            </p>
+          )}
+
+          {/* Body text */}
+          <div style={{ animation: "fadeIn 0.3s ease" }} key={showOriginal ? "original" : "edited"}>
+            {paragraphs.map((p, i) => (
+              <p key={i} style={{
+                fontFamily: F.body, fontSize: 18, lineHeight: 1.85,
+                color: C.inkLight, marginBottom: 20,
+              }}>
+                {i === 0 && useDropCap && !showOriginal && p.length > 0 ? (
+                  <>
+                    <span style={{
+                      fontFamily: F.display, fontSize: 58, fontWeight: 700,
+                      float: "left", lineHeight: 1, marginRight: 8,
+                      color: C.ink,
+                    }}>{p[0]}</span>
+                    {p.slice(1)}
+                  </>
+                ) : p}
+              </p>
+            ))}
+          </div>
+
+          {/* ARTICLE FOOTER */}
+          <div style={{ height: 1, backgroundColor: C.rule, margin: "40px 0 32px" }} />
+
+          {/* Tags */}
+          <div style={{
+            display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32, alignItems: "center",
+          }}>
+            {entry.mood != null && MOOD_MAP[entry.mood] && (
+              <span style={{
+                fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+                border: `1px solid ${C.rule}`, padding: "4px 10px",
+                display: "flex", alignItems: "center", gap: 5,
+              }}>
+                {MOOD_MAP[entry.mood].emoji} {MOOD_MAP[entry.mood].label}
+              </span>
+            )}
+            <span style={{
+              fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent,
+              textTransform: "uppercase", letterSpacing: "1px",
+              border: `1px solid ${C.rule}`, padding: "4px 10px",
+            }}>
+              {SECTION_MAP[entry.section] || entry.section}
+            </span>
+            <span style={{
+              fontFamily: F.mono, fontSize: 11, color: C.inkFaint,
+            }}>
+              {entry.word_count || 0} words
+            </span>
+          </div>
+
+          {/* From this edition */}
+          {siblingEntries && siblingEntries.length > 0 && (
+            <div style={{ marginBottom: 40 }}>
+              <div style={{ height: 2, backgroundColor: C.ink, marginBottom: 16 }} />
+              <h3 style={{
+                fontFamily: F.sans, fontSize: 11, fontWeight: 600,
+                textTransform: "uppercase", letterSpacing: "1.5px",
+                color: C.inkMuted, marginBottom: 16,
+              }}>From This Edition</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                {siblingEntries.map((sib, i) => (
+                  <div key={sib.id || i} style={{
+                    padding: "14px 0",
+                    borderBottom: i < siblingEntries.length - 1 ? `1px solid ${C.rule}` : "none",
+                    cursor: "pointer",
+                  }}
+                    onClick={() => {
+                      if (onNavigateToEntry) onNavigateToEntry(sib);
+                    }}
+                  >
+                    <div style={{
+                      fontFamily: F.sans, fontSize: 10, fontWeight: 600,
+                      color: C.accent, textTransform: "uppercase",
+                      letterSpacing: "1.5px", marginBottom: 4,
+                    }}>
+                      {SECTION_MAP[sib.section] || sib.section}
+                    </div>
+                    <h4 style={{
+                      fontFamily: F.display, fontSize: 16, fontWeight: 600,
+                      lineHeight: 1.3, color: C.ink, marginBottom: 4,
+                    }}>
+                      {sib.title || (sib.body ? sib.body.slice(0, 60) + "..." : "Untitled")}
+                    </h4>
+                    <span style={{
+                      fontFamily: F.sans, fontSize: 10, color: C.inkFaint,
+                    }}>
+                      {Math.max(1, Math.ceil((sib.word_count || 0) / 230))} min read
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Navigation: prev/next */}
+          <div style={{
+            display: "flex", justifyContent: "space-between", paddingTop: 20,
+            borderTop: `1px solid ${C.rule}`,
+          }}>
+            {onPrev ? (
+              <button onClick={onPrev} style={{
+                display: "flex", alignItems: "center", gap: 6,
+                fontFamily: F.sans, fontSize: 12, color: C.inkMuted,
+                background: "none", border: "none", cursor: "pointer",
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+                Previous
+              </button>
+            ) : <div />}
+            {onNext ? (
+              <button onClick={onNext} style={{
+                display: "flex", alignItems: "center", gap: 6,
+                fontFamily: F.sans, fontSize: 12, color: C.inkMuted,
+                background: "none", border: "none", cursor: "pointer",
+              }}>
+                Next
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+              </button>
+            ) : <div />}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 export default function App() {
@@ -1729,6 +2374,10 @@ export default function App() {
   const [accent, setAccent] = useState("red");
   const [editorOpen, setEditorOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [articleEntry, setArticleEntry] = useState(null);
+  const [articleList, setArticleList] = useState([]);
+  const [articleIndex, setArticleIndex] = useState(0);
   const [pubName, setPubName] = useState("The Deborah Times");
   const [motto, setMotto] = useState("All the life that's fit to print");
   const [view, setView] = useState("journal"); // journal | edition | archives | sections | reflections
@@ -1744,17 +2393,84 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const [editionData, setEditionData] = useState(null);
+  const [editionLoading, setEditionLoading] = useState(true);
+  const [profile, setProfile] = useState(null);
+  const [dataVersion, setDataVersion] = useState(0);
+
+  const handleRefresh = useCallback(() => {
+    setDataVersion((v) => v + 1);
+  }, []);
+
+  const openArticle = useCallback((entry, list, index) => {
+    setArticleEntry(entry);
+    setArticleList(list || []);
+    setArticleIndex(typeof index === "number" ? index : 0);
+  }, []);
+
+  const closeArticle = useCallback(() => {
+    setArticleEntry(null);
+    setArticleList([]);
+    setArticleIndex(0);
+  }, []);
+
+  const goArticlePrev = useCallback(() => {
+    if (articleIndex > 0 && articleList[articleIndex - 1]) {
+      setArticleIndex(articleIndex - 1);
+      setArticleEntry(articleList[articleIndex - 1]);
+    }
+  }, [articleIndex, articleList]);
+
+  const goArticleNext = useCallback(() => {
+    if (articleIndex < articleList.length - 1 && articleList[articleIndex + 1]) {
+      setArticleIndex(articleIndex + 1);
+      setArticleEntry(articleList[articleIndex + 1]);
+    }
+  }, [articleIndex, articleList]);
+
+  const openEditionArticle = useCallback(async (entryId) => {
+    if (!editionData?.edition?.id) return;
+    try {
+      const entries = await fetchEditionEntriesFull(editionData.edition.id);
+      const idx = entries.findIndex((e) => e.id === entryId);
+      openArticle(entries[idx >= 0 ? idx : 0], entries, idx >= 0 ? idx : 0);
+    } catch (err) {
+      console.error("Failed to load article:", err);
+    }
+  }, [editionData, openArticle]);
+
   useEffect(() => { setTimeout(() => setLoaded(true), 100); }, []);
   const C = getTheme(mode, accent);
-  const d = MOCK;
 
-  // Populate user data from session
+  // Build user object from session + profile
   const authUser = session?.user;
-  if (authUser) {
-    d.user.name = authUser.user_metadata?.name || authUser.email?.split("@")[0] || "User";
-    d.user.email = authUser.email || "";
-    d.user.avatar = (d.user.name[0] || "U").toUpperCase();
-  }
+  const userId = authUser?.id;
+  const user = {
+    name: profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "User",
+    email: profile?.email || authUser?.email || "",
+    plan: profile?.plan || "free",
+    avatar: (profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "U")[0].toUpperCase(),
+  };
+
+  // Fetch profile + edition data after auth
+  useEffect(() => {
+    if (!userId) return;
+    fetchProfile(userId)
+      .then((p) => {
+        setProfile(p);
+        if (p.publication_name) setPubName(p.publication_name);
+        if (p.motto) setMotto(p.motto);
+        if (p.theme_mode) setMode(p.theme_mode);
+        if (p.theme_accent) setAccent(p.theme_accent);
+      })
+      .catch(console.error);
+
+    setEditionLoading(true);
+    fetchLatestEdition(userId)
+      .then(setEditionData)
+      .catch(console.error)
+      .finally(() => setEditionLoading(false));
+  }, [userId, dataVersion]);
 
   // Loading state
   if (session === undefined) {
@@ -1793,7 +2509,7 @@ export default function App() {
         ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: ${C.rule}; border-radius: 3px; }
       `}</style>
 
-      <PlatformHeader user={d.user} C={C} onSettings={() => setSettingsOpen(true)} onEditor={() => setEditorOpen(true)} />
+      <PlatformHeader user={user} C={C} onSettings={() => setSettingsOpen(true)} onEditor={() => setEditorOpen(true)} onAdmin={() => setAdminOpen(true)} isMaster={profile?.is_master} />
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 24px" }}>
 
@@ -1824,21 +2540,26 @@ export default function App() {
 
         {/* CONDITIONAL VIEW */}
         {view === "journal" ? (
-          <JournalView C={C} data={d} onSwitchToEdition={() => setView("edition")} onNewEntry={() => setEditorOpen(true)} />
+          <JournalView C={C} userId={userId} onSwitchToEdition={() => setView("edition")} onNewEntry={() => setEditorOpen(true)} dataVersion={dataVersion} onOpenArticle={openArticle} />
         ) : view === "archives" ? (
-          <ArchivesView C={C} />
+          <ArchivesView C={C} userId={userId} />
         ) : view === "sections" ? (
-          <SectionsView C={C} />
+          <SectionsView C={C} userId={userId} onOpenArticle={openArticle} />
         ) : view === "reflections" ? (
-          <ReflectionsView C={C} />
+          <ReflectionsView C={C} userId={userId} />
         ) : (
         <div>
+        {editionLoading ? <LoadingBlock C={C} text="Loading latest edition..." /> : !editionData ? (
+          <div style={{ textAlign: "center", padding: "80px 0" }}>
+            <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>No editions yet. Start writing!</p>
+          </div>
+        ) : (<>
         {/* MASTHEAD — inside edition view */}
         <header style={{ textAlign: "center", padding: "20px 0 12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, flex: 1 }}>
-              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>Week of {d.edition.week}</span>
-              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{d.weather}</span>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>Week of {editionData.edition.week}</span>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>São Paulo · 28°C</span>
             </div>
             <div style={{ flex: 2, display: "flex", flexDirection: "column", alignItems: "center" }}>
               <div style={{ width: "100%", height: 2, backgroundColor: C.ruleDark }} />
@@ -1847,8 +2568,8 @@ export default function App() {
               <div style={{ width: "100%", height: 2, backgroundColor: C.ruleDark }} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flex: 1 }}>
-              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{d.edition.number}</span>
-              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{d.edition.entryCount} entries</span>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{editionData.edition.number}</span>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{editionData.edition.entryCount} entries</span>
             </div>
           </div>
         </header>
@@ -1857,43 +2578,43 @@ export default function App() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 340px", padding: "24px 0", animation: "fadeInUp 0.6s ease 0.2s both" }}>
           <div style={{ paddingRight: 28 }}>
-            <article>
+            {editionData.topStories[0] && <article onClick={() => openEditionArticle(editionData.topStories[0].id)} style={{ cursor: "pointer" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{d.topStories[0].section}</span>
-                {d.topStories[0].isPublic && <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg> Public</span>}
-                {d.topStories[0].aiEdited && <span style={{ fontFamily: F.sans, fontSize: 9, color: C.accent, display: "flex", alignItems: "center", gap: 3 }}>✦ AI</span>}
+                <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[0].section}</span>
+                {editionData.topStories[0].isPublic && <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg> Public</span>}
+                {editionData.topStories[0].aiEdited && <span style={{ fontFamily: F.sans, fontSize: 9, color: C.accent, display: "flex", alignItems: "center", gap: 3 }}>✦ AI</span>}
               </div>
-              <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 700, lineHeight: 1.15, color: C.ink, marginBottom: 10 }}>{d.topStories[0].headline}</h2>
-              <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkLight, lineHeight: 1.5, marginBottom: 16 }}>{d.topStories[0].subhead}</p>
+              <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 700, lineHeight: 1.15, color: C.ink, marginBottom: 10 }}>{editionData.topStories[0].headline}</h2>
+              <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkLight, lineHeight: 1.5, marginBottom: 16 }}>{editionData.topStories[0].subhead}</p>
               <div style={{ backgroundColor: C.sectionBg, height: 200, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
               </div>
-              <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{d.topStories[0].excerpt}</p>
+              <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{editionData.topStories[0].excerpt}</p>
               <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
-                <span>{d.topStories[0].readTime}</span><span style={{ color: C.rule }}>·</span><span>{d.topStories[0].date}</span><span style={{ color: C.rule }}>·</span><span style={{ fontStyle: "italic", color: C.inkFaint }}>via Telegram</span>
+                <span>{editionData.topStories[0].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[0].date}</span><span style={{ color: C.rule }}>·</span><span style={{ fontStyle: "italic", color: C.inkFaint }}>via {editionData.topStories[0].source === "telegram" ? "Telegram" : "App"}</span>
               </div>
-            </article>
-            <div style={{ height: 1, backgroundColor: C.rule, margin: "24px 0" }} />
-            <article>
+            </article>}
+            {editionData.topStories[1] && <><div style={{ height: 1, backgroundColor: C.rule, margin: "24px 0" }} />
+            <article onClick={() => openEditionArticle(editionData.topStories[1].id)} style={{ cursor: "pointer" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{d.topStories[1].section}</span>
-                <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> Private</span>
+                <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[1].section}</span>
+                {editionData.topStories[1].isPublic ? <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg> Public</span> : <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> Private</span>}
               </div>
-              <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 600, lineHeight: 1.2, color: C.ink, marginBottom: 8 }}>{d.topStories[1].headline}</h3>
-              <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkLight, marginBottom: 8 }}>{d.topStories[1].subhead}</p>
-              <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 10 }}>{d.topStories[1].excerpt}</p>
+              <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 600, lineHeight: 1.2, color: C.ink, marginBottom: 8 }}>{editionData.topStories[1].headline}</h3>
+              <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkLight, marginBottom: 8 }}>{editionData.topStories[1].subhead}</p>
+              <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 10 }}>{editionData.topStories[1].excerpt}</p>
               <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
-                <span>{d.topStories[1].readTime}</span><span style={{ color: C.rule }}>·</span><span>{d.topStories[1].date}</span><span style={{ color: C.rule }}>·</span><span style={{ fontStyle: "italic", color: C.inkFaint }}>via App</span>
+                <span>{editionData.topStories[1].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[1].date}</span><span style={{ color: C.rule }}>·</span><span style={{ fontStyle: "italic", color: C.inkFaint }}>via {editionData.topStories[1].source === "telegram" ? "Telegram" : "App"}</span>
               </div>
-            </article>
+            </article></>}
           </div>
           <div style={{ backgroundColor: C.rule }} />
           <div style={{ paddingLeft: 28 }}>
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, color: C.ink, marginBottom: 4 }}>The Week at a Glance</h3>
-              <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, marginBottom: 10 }}>{d.edition.week}</div>
+              <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, marginBottom: 10 }}>{editionData.edition.week}</div>
               <div style={{ height: 2, backgroundColor: C.accent, marginBottom: 14, width: 40 }} />
-              {d.briefing.map((item, i) => (
+              {editionData.briefing.map((item, i) => (
                 <div key={i} style={{ display: "flex", gap: 12, marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${C.rule}` }}>
                   <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, whiteSpace: "nowrap", minWidth: 30 }}>{item.day}</span>
                   <span style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.5, color: C.inkLight }}>{item.note}</span>
@@ -1902,14 +2623,14 @@ export default function App() {
             </div>
             <div style={{ backgroundColor: C.sectionBg, padding: 20, marginBottom: 24 }}>
               <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
-              <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>{d.editorial.headline}</h3>
-              <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{d.editorial.content}</p>
+              <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>{editionData.editorial.headline}</h3>
+              <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{editionData.editorial.content}</p>
               <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>— AI Editor</div>
             </div>
             <div>
               <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink, marginBottom: 10 }}>All Sections</h3>
               <div style={{ height: 2, backgroundColor: C.accent, marginBottom: 14, width: 40 }} />
-              {d.sections.map((s, i) => (
+              {editionData.sections.map((s, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.rule}` }}>
                   <span style={{ fontFamily: F.sans, fontSize: 12, color: C.inkLight }}>{s.name}</span>
                   <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, backgroundColor: C.sectionBg, padding: "2px 8px" }}>{s.count}</span>
@@ -1919,12 +2640,12 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ marginBottom: 24 }}>
+        {editionData.moreStories.length > 0 && <div style={{ marginBottom: 24 }}>
           <div style={{ height: 2, backgroundColor: C.ink, marginBottom: 16 }} />
           <h3 style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: C.inkMuted, marginBottom: 16 }}>Also in This Edition</h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
-            {d.moreStories.map((s, i) => (
-              <div key={i} style={{ borderRight: i < 2 ? `1px solid ${C.rule}` : "none", paddingRight: 24 }}>
+            {editionData.moreStories.map((s, i) => (
+              <div key={i} onClick={() => openEditionArticle(s.id)} style={{ borderRight: i < editionData.moreStories.length - 1 ? `1px solid ${C.rule}` : "none", paddingRight: 24, cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{s.section}</span>
                   {s.isPublic ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.inkFaint} strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg> : <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.inkFaint} strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>}
@@ -1934,10 +2655,10 @@ export default function App() {
               </div>
             ))}
           </div>
-        </div>
+        </div>}
 
         <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, marginBottom: 24 }}>
-          {[{ n: d.stats.totalEntries.toLocaleString(), l: "Total Entries" }, { n: d.stats.thisEdition, l: "This Edition" }, { n: d.stats.editions, l: "Editions" }, { n: d.stats.wordsThisWeek.toLocaleString(), l: "Words This Week" }].map((s, i, a) => (
+          {[{ n: editionData.stats.totalEntries.toLocaleString(), l: "Total Entries" }, { n: editionData.stats.thisEdition, l: "This Edition" }, { n: editionData.stats.editions, l: "Editions" }, { n: editionData.stats.wordsThisWeek.toLocaleString(), l: "Words This Week" }].map((s, i, a) => (
             <div key={i} style={{ display: "flex", alignItems: "center" }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 32px" }}>
                 <span style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink }}>{s.n}</span>
@@ -1948,6 +2669,7 @@ export default function App() {
           ))}
         </div>
 
+        </>)}
         </div>
         )}
 
@@ -1963,8 +2685,28 @@ export default function App() {
         </footer>
       </div>
 
-      {editorOpen && <EditorView onClose={() => setEditorOpen(false)} C={C} />}
-      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} pubName={pubName} setPubName={setPubName} motto={motto} setMotto={setMotto} />
+      {editorOpen && <EditorView onClose={() => setEditorOpen(false)} onPublished={handleRefresh} C={C} userId={userId} session={session} />}
+      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} pubName={pubName} setPubName={setPubName} motto={motto} setMotto={setMotto} userId={userId} />
+      {adminOpen && <AdminPromptsPage C={C} onClose={() => setAdminOpen(false)} />}
+      {articleEntry && (
+        <ArticleView
+          entry={articleEntry}
+          edition={articleEntry.edition || null}
+          onClose={closeArticle}
+          onPrev={articleIndex > 0 ? goArticlePrev : null}
+          onNext={articleIndex < articleList.length - 1 ? goArticleNext : null}
+          C={C}
+          isProUser={user.plan === "pro" || user.plan === "team"}
+          siblingEntries={articleList.filter((_, i) => i !== articleIndex).slice(0, 3)}
+          onNavigateToEntry={(sib) => {
+            const idx = articleList.findIndex((e) => e.id === sib.id);
+            if (idx >= 0) {
+              setArticleIndex(idx);
+              setArticleEntry(articleList[idx]);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
