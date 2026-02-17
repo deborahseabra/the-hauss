@@ -2910,6 +2910,7 @@ export default function App() {
     if (!userId) return;
     fetchProfile(userId)
       .then((p) => {
+        console.log("[DEBUG] Profile data from Supabase:", JSON.stringify(p));
         setProfile(p);
         if (p.publication_name) setPubName(p.publication_name);
         if (p.motto) setMotto(p.motto);
