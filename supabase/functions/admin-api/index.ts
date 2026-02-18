@@ -67,6 +67,8 @@ Deno.serve(async (req: Request) => {
         return await createUser(supabase, params);
       case "dashboard_stats":
         return await dashboardStats(supabase);
+      case "generate_edition":
+        return await generateEdition(authHeader, params);
       default:
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     }
@@ -387,4 +389,32 @@ async function dashboardStats(
     top_writers: topWriters,
     recent_signups: recentSignups || [],
   });
+}
+
+// ── generate_edition ─────────────────────────────────────────
+
+async function generateEdition(
+  authHeader: string,
+  params: { user_id?: string; week_start?: string }
+) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const res = await fetch(`${supabaseUrl}/functions/v1/generate-edition`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader,
+    },
+    body: JSON.stringify({
+      user_id: params.user_id,
+      week_start: params.week_start,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return jsonResponse(
+      { error: data?.error || "Failed to generate edition", details: data },
+      res.status
+    );
+  }
+  return jsonResponse(data);
 }

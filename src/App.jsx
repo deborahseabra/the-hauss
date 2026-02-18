@@ -6,6 +6,8 @@ import {
   fetchProfile,
   fetchJournal,
   fetchLatestEdition,
+  fetchEditionByOffset,
+  fetchEditionById,
   fetchAllEditions,
   fetchSections,
   fetchAllReflections,
@@ -19,6 +21,10 @@ import {
   uploadAttachment,
   createAttachments,
   adminApi,
+  fetchPublicEntry,
+  fetchPublicProfile,
+  fetchPublicEdition,
+  updateEditionSharing,
 } from "./lib/api";
 import { hasAccess, ROLE_LABELS, ROLE_BADGE_STYLES } from "./lib/access";
 
@@ -324,14 +330,108 @@ function LocationForm({ C, onAdd, onCancel }) {
   const [name, setName] = useState("");
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [geoStatus, setGeoStatus] = useState(null);
+  const debounceRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    setGeoStatus("detecting");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const rlat = pos.coords.latitude;
+        const rlng = pos.coords.longitude;
+        setLat(String(rlat));
+        setLng(String(rlng));
+        try {
+          const res = await fetch(`https://photon.komoot.io/reverse?lat=${rlat}&lon=${rlng}`);
+          const data = await res.json();
+          if (data.features?.length > 0) {
+            const p = data.features[0].properties;
+            const placeName = [p.name, p.city || p.town || p.village, p.country].filter(Boolean).join(", ");
+            setName(placeName);
+          }
+          setGeoStatus("done");
+        } catch {
+          setGeoStatus("done");
+        }
+      },
+      () => setGeoStatus("denied"),
+      { timeout: 8000 }
+    );
+  }, []);
+
+  const handleSearch = (query) => {
+    setName(query);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (query.trim().length < 2) { setSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5`);
+        const data = await res.json();
+        setSuggestions((data.features || []).map((f) => {
+          const p = f.properties;
+          const label = [p.name, p.city || p.town || p.village, p.state, p.country].filter(Boolean).join(", ");
+          return { label, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] };
+        }));
+      } catch {
+        setSuggestions([]);
+      }
+    }, 300);
+  };
+
+  const selectSuggestion = (s) => {
+    setName(s.label);
+    setLat(String(s.lat));
+    setLng(String(s.lng));
+    setSuggestions([]);
+  };
+
+  const inputStyle = { width: "100%", padding: "6px 8px", fontFamily: F.sans, fontSize: 11, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" };
+
   return (
     <div style={{ marginTop: 8, padding: "10px", backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, animation: "fadeIn 0.2s ease" }}>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Place name" style={{ width: "100%", padding: "6px 8px", marginBottom: 6, fontFamily: F.sans, fontSize: 11, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        <input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="Latitude" type="number" step="any" style={{ flex: 1, padding: "6px 8px", fontFamily: F.mono, fontSize: 10, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
-        <input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="Longitude" type="number" step="any" style={{ flex: 1, padding: "6px 8px", fontFamily: F.mono, fontSize: 10, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }} />
+      {geoStatus === "detecting" && (
+        <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted, marginBottom: 6 }}>Detecting your location...</div>
+      )}
+      <div style={{ position: "relative" }}>
+        <input
+          ref={inputRef}
+          value={name}
+          onChange={(e) => handleSearch(e.target.value)}
+          placeholder="Search for a place..."
+          style={{ ...inputStyle, marginBottom: suggestions.length > 0 ? 0 : 6 }}
+        />
+        {suggestions.length > 0 && (
+          <div style={{
+            position: "absolute", left: 0, right: 0, top: "100%", zIndex: 10,
+            backgroundColor: C.bg, border: `1px solid ${C.rule}`, borderTop: "none",
+            maxHeight: 160, overflowY: "auto",
+          }}>
+            {suggestions.map((s, i) => (
+              <button key={i} onClick={() => selectSuggestion(s)} style={{
+                display: "block", width: "100%", textAlign: "left", padding: "6px 8px",
+                background: "none", border: "none", cursor: "pointer",
+                fontFamily: F.sans, fontSize: 10, color: C.inkLight,
+                borderBottom: i < suggestions.length - 1 ? `1px solid ${C.rule}` : "none",
+              }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.sectionBg; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+              >
+                <span style={{ fontWeight: 500, color: C.ink }}>{s.label.split(",")[0]}</span>
+                {s.label.includes(",") && <span style={{ color: C.inkMuted }}>, {s.label.split(",").slice(1).join(",")}</span>}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 6 }}>
+      {lat && lng && (
+        <div style={{ fontFamily: F.mono, fontSize: 9, color: C.inkFaint, marginBottom: 6, marginTop: 4 }}>
+          {parseFloat(lat).toFixed(4)}, {parseFloat(lng).toFixed(4)}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
         <button onClick={() => name.trim() && onAdd(name, lat, lng)} disabled={!name.trim()} style={{ flex: 1, padding: "5px", fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: name.trim() ? C.bg : C.inkFaint, backgroundColor: name.trim() ? C.ink : C.rule, border: "none", cursor: name.trim() ? "pointer" : "default" }}>Add</button>
         <button onClick={onCancel} style={{ padding: "5px 10px", fontFamily: F.sans, fontSize: 10, color: C.inkMuted, background: "none", border: `1px solid ${C.rule}`, cursor: "pointer" }}>Cancel</button>
       </div>
@@ -1163,7 +1263,7 @@ function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, on
 // ============================================================
 // ARCHIVES VIEW — Past editions as a grid of "covers"
 // ============================================================
-function ArchivesView({ C, userId }) {
+function ArchivesView({ C, userId, onSelectEdition, onSwitchToEdition }) {
   const [editions, setEditions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1207,6 +1307,11 @@ function ArchivesView({ C, userId }) {
             transition: "border-color 0.2s, transform 0.2s",
             animation: `fadeInUp 0.4s ease ${i * 0.05}s both`,
           }}
+            onClick={() => {
+              if (!ed?.id) return;
+              if (onSelectEdition) onSelectEdition(ed.id);
+              if (onSwitchToEdition) onSwitchToEdition();
+            }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.ink; e.currentTarget.style.transform = "translateY(-2px)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.rule; e.currentTarget.style.transform = "translateY(0)"; }}
           >
@@ -1816,13 +1921,88 @@ function Ticker({ C }) {
   );
 }
 
-function EditionSwitcher({ C }) {
-  const [a, setA] = useState("week");
+function EditionSwitcher({ C, period, onPeriodChange, canAccessArchives, editionsList, onSelectEdition }) {
+  const [showArchivePicker, setShowArchivePicker] = useState(false);
+  const archivePickerRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (archivePickerRef.current && !archivePickerRef.current.contains(e.target)) {
+        setShowArchivePicker(false);
+      }
+    };
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, []);
+
+  const tabs = [
+    { k: "week", l: "This Week", locked: false },
+    { k: "last", l: "Last Week", locked: !canAccessArchives },
+    { k: "month", l: "This Month", locked: !canAccessArchives },
+    { k: "archive", l: "All Editions", locked: !canAccessArchives },
+  ];
+
+  const handleClick = (o) => {
+    if (o.locked) return;
+    if (o.k === "archive") {
+      setShowArchivePicker(true);
+      if (period !== "archive") onPeriodChange("archive");
+    } else {
+      setShowArchivePicker(false);
+      onPeriodChange(o.k);
+    }
+  };
+
   return (
-    <div style={{ display: "flex", justifyContent: "center", padding: "12px 0", borderBottom: `1px solid ${C.rule}` }}>
-      {[{ k: "week", l: "This Week" }, { k: "last", l: "Last Week" }, { k: "month", l: "This Month" }, { k: "archive", l: "All Editions" }].map((o) => (
-        <button key={o.k} onClick={() => setA(o.k)} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: a === o.k ? 500 : 400, color: a === o.k ? C.bg : C.inkMuted, backgroundColor: a === o.k ? C.ink : "transparent", border: `1px solid ${a === o.k ? C.ink : C.rule}`, padding: "6px 16px", cursor: "pointer", marginLeft: -1 }}>{o.l}</button>
+    <div style={{ display: "flex", justifyContent: "center", padding: "12px 0", borderBottom: `1px solid ${C.rule}`, position: "relative" }} ref={archivePickerRef}>
+      {tabs.map((o) => (
+        <button
+          key={o.k}
+          onClick={() => handleClick(o)}
+          style={{
+            fontFamily: F.sans, fontSize: 11, fontWeight: period === o.k ? 500 : 400,
+            color: o.locked ? C.inkFaint : (period === o.k ? C.bg : C.inkMuted),
+            backgroundColor: period === o.k && !o.locked ? C.ink : "transparent",
+            border: `1px solid ${period === o.k && !o.locked ? C.ink : C.rule}`,
+            padding: "6px 16px", cursor: o.locked ? "default" : "pointer",
+            marginLeft: -1, opacity: o.locked ? 0.7 : 1,
+          }}
+          title={o.locked ? "Upgrade to access archives" : undefined}
+        >
+          {o.l}
+        </button>
       ))}
+      {showArchivePicker && canAccessArchives && editionsList.length > 0 && (
+        <div style={{
+          position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)",
+          marginTop: 4, padding: 8, backgroundColor: C.bg, border: `1px solid ${C.rule}`,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)", maxHeight: 240, overflowY: "auto",
+          minWidth: 280, zIndex: 100,
+        }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Select Edition</div>
+          {editionsList.map((ed) => (
+            <button
+              key={ed.id}
+              onClick={() => {
+                onSelectEdition(ed.id);
+                setShowArchivePicker(false);
+              }}
+              style={{
+                display: "block", width: "100%", textAlign: "left", padding: "8px 10px",
+                background: "none", border: "none", cursor: "pointer",
+                fontFamily: F.sans, fontSize: 12, color: C.inkLight,
+                borderBottom: `1px solid ${C.rule}`,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.sectionBg; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+            >
+              <span style={{ fontWeight: 500, color: C.ink }}>{ed.week}</span>
+              <span style={{ color: C.inkMuted, marginLeft: 8 }}>{ed.num}</span>
+              <span style={{ display: "block", fontFamily: F.body, fontSize: 10, fontStyle: "italic", color: C.inkFaint, marginTop: 2 }}>{ed.headline}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2320,6 +2500,16 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
 function AdminDashboardTab({ C, session }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [generateUserId, setGenerateUserId] = useState(session?.user?.id || "");
+  const [generateWeekStart, setGenerateWeekStart] = useState(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  });
+  const [generatingEdition, setGeneratingEdition] = useState(false);
+  const [generateMsg, setGenerateMsg] = useState(null);
 
   useEffect(() => {
     adminApi(session, "dashboard_stats")
@@ -2374,6 +2564,65 @@ function AdminDashboardTab({ C, session }) {
       <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 24 }}>
         Platform metrics at a glance.
       </p>
+
+      {/* Manual edition generation */}
+      <div style={{ border: `1px solid ${C.rule}`, backgroundColor: C.sectionBg, padding: "14px 16px", marginBottom: 20 }}>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: C.inkMuted, marginBottom: 10 }}>
+          Edition Generator
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 160px auto", gap: 8, alignItems: "center" }}>
+          <input
+            value={generateUserId}
+            onChange={(e) => setGenerateUserId(e.target.value)}
+            placeholder="User ID (blank = all users if enabled server-side)"
+            style={{
+              padding: "8px 10px", fontFamily: F.mono, fontSize: 11, color: C.ink,
+              backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none",
+            }}
+          />
+          <input
+            type="date"
+            value={generateWeekStart}
+            onChange={(e) => setGenerateWeekStart(e.target.value)}
+            style={{
+              padding: "8px 10px", fontFamily: F.sans, fontSize: 11, color: C.ink,
+              backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none",
+            }}
+          />
+          <button
+            onClick={async () => {
+              setGeneratingEdition(true);
+              setGenerateMsg(null);
+              try {
+                const payload = {
+                  user_id: generateUserId.trim() || undefined,
+                  week_start: generateWeekStart || undefined,
+                };
+                await adminApi(session, "generate_edition", payload);
+                setGenerateMsg("Edition generation started/completed successfully.");
+              } catch (err) {
+                setGenerateMsg(`Error: ${err.message}`);
+              } finally {
+                setGeneratingEdition(false);
+              }
+            }}
+            disabled={generatingEdition}
+            style={{
+              padding: "8px 14px", fontFamily: F.sans, fontSize: 11, fontWeight: 600,
+              color: C.bg, backgroundColor: C.ink, border: "none",
+              cursor: generatingEdition ? "default" : "pointer",
+              opacity: generatingEdition ? 0.7 : 1,
+            }}
+          >
+            {generatingEdition ? "Generating..." : "Generate Edition"}
+          </button>
+        </div>
+        {generateMsg && (
+          <div style={{ marginTop: 8, fontFamily: F.sans, fontSize: 11, color: generateMsg.startsWith("Error:") ? "#c41e1e" : C.accent }}>
+            {generateMsg}
+          </div>
+        )}
+      </div>
 
       {/* Row 1: Big numbers */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
@@ -2469,6 +2718,7 @@ function AdminDashboardTab({ C, session }) {
 // ============================================================
 function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, siblingEntries, onNavigateToEntry }) {
   const [showOriginal, setShowOriginal] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -2556,6 +2806,32 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
           {edCtx ? `Vol. ${edCtx.volume} · No. ${edCtx.number || edCtx.num}` : "My Journal"}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {entry.is_public && (
+            <button onClick={() => {
+              const url = `${window.location.origin}/entry/${entry.id}`;
+              navigator.clipboard.writeText(url).then(() => {
+                setShareCopied(true);
+                setTimeout(() => setShareCopied(false), 2000);
+              });
+            }} style={{
+              display: "flex", alignItems: "center", gap: 4, background: "none",
+              border: `1px solid ${C.rule}`, padding: "4px 10px", cursor: "pointer",
+              fontFamily: F.sans, fontSize: 10, color: shareCopied ? C.accent : C.inkMuted,
+              transition: "color 0.2s",
+            }}>
+              {shareCopied ? (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Link copied!
+                </>
+              ) : (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                  Share
+                </>
+              )}
+            </button>
+          )}
           {entry.is_public ? (
             <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg>
@@ -2817,6 +3093,366 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
 }
 
 // ============================================================
+// PUBLIC ENTRY VIEW — Shareable reading experience (no auth)
+// ============================================================
+function PublicEntryView() {
+  const [entry, setEntry] = useState(null);
+  const [authorName, setAuthorName] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [fullScreen, setFullScreen] = useState(false);
+
+  const C = getTheme("light", "red");
+
+  const entryId = window.location.pathname.split("/entry/")[1];
+
+  useEffect(() => {
+    if (!entryId) { setError("Entry not found."); setLoading(false); return; }
+    fetchPublicEntry(entryId)
+      .then(async (e) => {
+        setEntry(e);
+        try {
+          const p = await fetchPublicProfile(e.user_id);
+          if (p) setAuthorName(p.name);
+        } catch { /* author name is optional */ }
+      })
+      .catch(() => setError("This entry doesn't exist or isn't public."))
+      .finally(() => setLoading(false));
+  }, [entryId]);
+
+  useEffect(() => {
+    const handleEsc = (e) => { if (e.key === "Escape" && fullScreen) setFullScreen(false); };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [fullScreen]);
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap');
+          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        `}</style>
+        <div style={{ textAlign: "center", animation: "fadeIn 0.4s ease" }}>
+          <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 28, fontWeight: 700, color: "#121212" }}>The Hauss</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !entry) {
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#fff" }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,300;1,8..60,400;1,8..60,500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+        `}</style>
+        <div style={{ borderBottom: "1px solid #e2e2e2", padding: "0 32px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <a href="/" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 20, fontWeight: 700, color: "#121212", textDecoration: "none" }}>The Hauss</a>
+          <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: "#fff", backgroundColor: "#121212", padding: "8px 20px", textDecoration: "none" }}>Start Writing</a>
+        </div>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "120px 24px", textAlign: "center" }}>
+          <div style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, color: "#121212", marginBottom: 12 }}>Not Found</div>
+          <p style={{ fontFamily: F.body, fontSize: 16, color: "#727272", fontStyle: "italic" }}>{error || "This entry doesn't exist or isn't public."}</p>
+          <a href="/" style={{ display: "inline-block", marginTop: 32, fontFamily: F.sans, fontSize: 13, color: "#c41e1e", textDecoration: "none" }}>← Back to The Hauss</a>
+        </div>
+      </div>
+    );
+  }
+
+  const SECTION_MAP = {
+    dispatch: "Dispatch", essay: "Personal Essay", letter: "Letter to Self",
+    review: "Review", photo: "Photo Essay",
+  };
+  const SOURCE_MAP = { app: "App", telegram: "Telegram", whatsapp: "WhatsApp", api: "API" };
+  const MOOD_MAP = [
+    { emoji: "☀️", label: "Bright" }, { emoji: "🌤", label: "Calm" },
+    { emoji: "🌧", label: "Heavy" }, { emoji: "⚡", label: "Electric" },
+    { emoji: "🌙", label: "Reflective" },
+  ];
+
+  const readTime = Math.max(1, Math.ceil((entry.word_count || 0) / 230));
+  const hasAiEdit = entry.ai_edit?.applied;
+  const headline = hasAiEdit && entry.ai_edit.headline ? entry.ai_edit.headline : entry.title;
+  const subhead = hasAiEdit && entry.ai_edit.subhead ? entry.ai_edit.subhead : null;
+  const bodyText = hasAiEdit ? entry.ai_edit.edited_body : entry.body;
+  const paragraphs = (bodyText || "").split("\n\n").filter(Boolean);
+  const useDropCap = hasAiEdit && entry.ai_edit?.mode === "rewrite";
+  const photo = (entry.attachments || []).find((a) => a.type === "photo");
+
+  const createdDate = new Date(entry.created_at);
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const dateStr = `${months[createdDate.getMonth()]} ${createdDate.getDate()}, ${createdDate.getFullYear()}`;
+
+  const metaParts = [dateStr, `${readTime} min read`];
+  if (authorName) metaParts.push(`by ${authorName}`);
+  if (entry.mood != null && MOOD_MAP[entry.mood]) metaParts.push(MOOD_MAP[entry.mood].emoji);
+
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#fff", color: "#121212" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,300;1,8..60,400;1,8..60,500&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@300;400&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        ::selection { background: #121212; color: #fff; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      `}</style>
+
+      {/* Navbar */}
+      {!fullScreen && (
+        <div style={{
+          borderBottom: "1px solid #e2e2e2", padding: "0 32px", height: 56,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          animation: "fadeIn 0.3s ease",
+        }}>
+          <a href="/" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 20, fontWeight: 700, color: "#121212", textDecoration: "none" }}>The Hauss</a>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={() => setFullScreen(true)} style={{
+              display: "flex", alignItems: "center", gap: 4, background: "none",
+              border: "1px solid #e2e2e2", padding: "5px 12px", cursor: "pointer",
+              fontFamily: F.sans, fontSize: 10, color: "#727272",
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+              Full Screen
+            </button>
+            <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: "#fff", backgroundColor: "#121212", padding: "8px 20px", textDecoration: "none" }}>Start Writing</a>
+          </div>
+        </div>
+      )}
+
+      {/* Full-screen exit bar */}
+      {fullScreen && (
+        <button onClick={() => setFullScreen(false)} style={{
+          position: "fixed", top: 16, right: 16, zIndex: 100,
+          display: "flex", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.9)",
+          border: "1px solid #e2e2e2", padding: "5px 12px", cursor: "pointer",
+          fontFamily: F.sans, fontSize: 10, color: "#727272",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+        }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          Exit Full Screen
+        </button>
+      )}
+
+      {/* Article Content */}
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: fullScreen ? "60px 24px 120px" : "48px 24px 120px", animation: "fadeIn 0.5s ease" }}>
+        {/* Section label */}
+        <div style={{
+          fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: "#c41e1e",
+          textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16,
+        }}>
+          {SECTION_MAP[entry.section] || entry.section}
+        </div>
+
+        {/* Headline */}
+        {headline && (
+          <h1 style={{
+            fontFamily: F.display, fontSize: 36, fontWeight: 700,
+            lineHeight: 1.15, color: "#121212", marginBottom: subhead ? 12 : 20,
+          }}>{headline}</h1>
+        )}
+
+        {/* Subhead */}
+        {subhead && (
+          <p style={{
+            fontFamily: F.body, fontSize: 17, fontStyle: "italic",
+            color: "#727272", lineHeight: 1.5, marginBottom: 20,
+          }}>{subhead}</p>
+        )}
+
+        {/* Divider */}
+        <div style={{ width: 60, height: 2, backgroundColor: "#121212", marginBottom: 20 }} />
+
+        {/* Meta */}
+        <div style={{ fontFamily: F.sans, fontSize: 11, color: "#999", marginBottom: 32 }}>
+          {metaParts.join(" · ")}
+        </div>
+
+        {/* AI badge */}
+        {hasAiEdit && (
+          <div style={{
+            fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: "#c41e1e",
+            marginBottom: 24, display: "flex", alignItems: "center", gap: 4,
+          }}>
+            ✦ AI · {entry.ai_edit.tone || entry.ai_edit.mode}
+          </div>
+        )}
+
+        {/* Photo */}
+        {photo && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ width: "100%", height: 400, backgroundColor: "#f7f7f7", overflow: "hidden" }}>
+              {photo.url ? (
+                <img src={photo.url} alt={photo.metadata?.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#999" }}>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                </div>
+              )}
+            </div>
+            {photo.metadata?.caption && (
+              <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: "#999", marginTop: 8 }}>{photo.metadata.caption}</div>
+            )}
+          </div>
+        )}
+
+        {/* Body */}
+        {paragraphs.map((p, i) => (
+          <p key={i} style={{
+            fontFamily: F.body, fontSize: 18, lineHeight: 1.85,
+            color: "#3a3a3a", marginBottom: 20,
+          }}>
+            {useDropCap && i === 0 ? (
+              <>
+                <span style={{
+                  fontFamily: F.display, fontSize: 58, float: "left", lineHeight: 1,
+                  marginRight: 8, fontWeight: 700, color: "#121212",
+                }}>{p[0]}</span>
+                {p.slice(1)}
+              </>
+            ) : p}
+          </p>
+        ))}
+
+        {/* Footer divider */}
+        <div style={{ height: 1, backgroundColor: "#e2e2e2", margin: "40px 0 24px" }} />
+
+        {/* Tags */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 32 }}>
+          {entry.mood != null && MOOD_MAP[entry.mood] && (
+            <span style={{ fontFamily: F.sans, fontSize: 10, padding: "4px 10px", border: "1px solid #e2e2e2", color: "#727272" }}>
+              {MOOD_MAP[entry.mood].emoji} {MOOD_MAP[entry.mood].label}
+            </span>
+          )}
+          <span style={{ fontFamily: F.sans, fontSize: 10, padding: "4px 10px", border: "1px solid #e2e2e2", color: "#727272" }}>
+            {SECTION_MAP[entry.section]}
+          </span>
+          <span style={{ fontFamily: F.sans, fontSize: 10, padding: "4px 10px", border: "1px solid #e2e2e2", color: "#727272" }}>
+            {entry.word_count} words
+          </span>
+        </div>
+
+        {/* CTA */}
+        <div style={{
+          textAlign: "center", padding: "40px 0", borderTop: "1px solid #e2e2e2",
+        }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: "#999", textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 8 }}>
+            MADE WITH
+          </div>
+          <a href="/" style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: "#121212", textDecoration: "none" }}>The Hauss</a>
+          <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: "#999", margin: "8px 0 20px" }}>
+            Your life, published weekly.
+          </p>
+          <a href="/login" style={{
+            display: "inline-block", fontFamily: F.sans, fontSize: 13, fontWeight: 500,
+            color: "#fff", backgroundColor: "#121212", padding: "12px 32px", textDecoration: "none",
+          }}>
+            Start Writing — It's Free
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PUBLIC EDITION VIEW — shareable edition route
+// ============================================================
+function PublicEditionView() {
+  const [editionData, setEditionData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const editionId = window.location.pathname.split("/edition/")[1];
+
+  useEffect(() => {
+    if (!editionId) {
+      setError("Edition not found.");
+      setLoading(false);
+      return;
+    }
+    fetchPublicEdition(editionId)
+      .then(setEditionData)
+      .catch(() => setError("This edition is private or unavailable."))
+      .finally(() => setLoading(false));
+  }, [editionId]);
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }}>
+        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 28, fontWeight: 700, color: "#121212" }}>The Hauss</div>
+      </div>
+    );
+  }
+
+  if (error || !editionData) {
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#fff", color: "#121212" }}>
+        <div style={{ borderBottom: "1px solid #e2e2e2", padding: "0 24px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <a href="/" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 22, fontWeight: 700, color: "#121212", textDecoration: "none" }}>The Hauss</a>
+          <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: "#fff", backgroundColor: "#121212", padding: "8px 18px", textDecoration: "none" }}>Start Writing</a>
+        </div>
+        <div style={{ maxWidth: 740, margin: "0 auto", padding: "100px 24px", textAlign: "center" }}>
+          <h1 style={{ fontFamily: F.display, fontSize: 34, marginBottom: 12 }}>Edition Unavailable</h1>
+          <p style={{ fontFamily: F.body, fontSize: 16, fontStyle: "italic", color: "#727272" }}>{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const isCover = editionData.mode === "cover";
+
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#fff", color: "#121212" }}>
+      <div style={{ borderBottom: "1px solid #e2e2e2", padding: "0 24px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <a href="/" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 22, fontWeight: 700, color: "#121212", textDecoration: "none" }}>The Hauss</a>
+        <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: "#fff", backgroundColor: "#121212", padding: "8px 18px", textDecoration: "none" }}>Start Writing</a>
+      </div>
+
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px 24px 60px" }}>
+        <header style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: "#c41e1e", textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 8 }}>
+            Shared Edition
+          </div>
+          <h1 style={{ fontFamily: F.display, fontSize: 40, fontWeight: 700, marginBottom: 6 }}>
+            Vol. {editionData.edition.volume} · No. {editionData.edition.num || editionData.edition.number}
+          </h1>
+          <div style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: "#727272" }}>
+            Week of {editionData.edition.week}
+          </div>
+        </header>
+
+        <div style={{ display: "flex", justifyContent: "center", gap: 20, marginBottom: 24 }}>
+          <span style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{editionData.edition.entryCount} entries</span>
+          <span style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{editionData.stats?.wordsThisWeek?.toLocaleString?.() || 0} words</span>
+          <span style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{isCover ? "Cover view" : "Full reading"}</span>
+        </div>
+
+        {isCover ? (
+          <div style={{ border: "1px solid #e2e2e2", backgroundColor: "#f7f7f7", padding: "30px 24px", textAlign: "center" }}>
+            <div style={{ fontFamily: F.display, fontSize: 22, marginBottom: 8 }}>This edition is shared in cover mode</div>
+            <p style={{ fontFamily: F.body, fontSize: 14, color: "#727272", fontStyle: "italic", marginBottom: 14 }}>
+              Reader tier shares an editorial cover preview. Upgrade to unlock full reading links.
+            </p>
+            <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, color: "#c41e1e", textDecoration: "none" }}>Create your own edition →</a>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {(editionData.topStories || []).concat(editionData.moreStories || []).map((s, i) => (
+              <a key={`${s.id}-${i}`} href={`/entry/${s.id}`} style={{ border: "1px solid #e2e2e2", padding: "14px 16px", textDecoration: "none", color: "#121212" }}>
+                <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: "#c41e1e", textTransform: "uppercase", letterSpacing: "1.2px", marginBottom: 6 }}>
+                  {s.section}
+                </div>
+                <h3 style={{ fontFamily: F.display, fontSize: 20, lineHeight: 1.25, marginBottom: 8 }}>{s.headline}</h3>
+                <div style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{s.readTime}</div>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 export default function App() {
@@ -2847,6 +3483,11 @@ export default function App() {
 
   const [editionData, setEditionData] = useState(null);
   const [editionLoading, setEditionLoading] = useState(true);
+  const [editionPeriod, setEditionPeriod] = useState("week");
+  const [selectedEditionId, setSelectedEditionId] = useState(null);
+  const [editionsList, setEditionsList] = useState([]);
+  const [shareSaving, setShareSaving] = useState(false);
+  const [shareToast, setShareToast] = useState(null);
   const [profile, setProfile] = useState(null);
   const [dataVersion, setDataVersion] = useState(0);
 
@@ -2905,26 +3546,103 @@ export default function App() {
     avatar: (profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "U")[0].toUpperCase(),
   };
 
-  // Fetch profile + edition data after auth
+  const canShareFullEdition = hasAccess(user.role, user.isTester, "editor");
+
+  const handleToggleEditionShare = useCallback(async () => {
+    if (!userId || !editionData?.edition?.id || shareSaving) return;
+    setShareSaving(true);
+    setShareToast(null);
+    try {
+      const isPublic = !editionData.edition.is_public;
+      const shareMode = canShareFullEdition ? "full" : "cover";
+      const updated = await updateEditionSharing(userId, editionData.edition.id, {
+        isPublic,
+        shareMode,
+      });
+      setEditionData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          edition: {
+            ...prev.edition,
+            is_public: updated.is_public,
+            share_mode: updated.share_mode,
+          },
+        };
+      });
+      setShareToast(isPublic ? "Edition is now public." : "Edition is now private.");
+      setTimeout(() => setShareToast(null), 2200);
+    } catch (err) {
+      setShareToast("Failed to update sharing.");
+      setTimeout(() => setShareToast(null), 2200);
+    } finally {
+      setShareSaving(false);
+    }
+  }, [userId, editionData, canShareFullEdition, shareSaving]);
+
+  const handleCopyEditionShareLink = useCallback(async () => {
+    if (!editionData?.edition?.id) return;
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/edition/${editionData.edition.id}`);
+      setShareToast("Share link copied.");
+      setTimeout(() => setShareToast(null), 2200);
+    } catch {
+      setShareToast("Unable to copy link.");
+      setTimeout(() => setShareToast(null), 2200);
+    }
+  }, [editionData]);
+
+  const canAccessArchives = hasAccess(profile?.role || "reader", profile?.is_tester || false, "editor");
+
+  // Fetch profile after auth
   useEffect(() => {
     if (!userId) return;
     fetchProfile(userId)
       .then((p) => {
-        console.log("[DEBUG] Profile data from Supabase:", JSON.stringify(p));
         setProfile(p);
-        if (p.publication_name) setPubName(p.publication_name);
-        if (p.motto) setMotto(p.motto);
-        if (p.theme_mode) setMode(p.theme_mode);
-        if (p.theme_accent) setAccent(p.theme_accent);
+        if (p?.publication_name) setPubName(p.publication_name);
+        if (p?.motto) setMotto(p.motto);
+        if (p?.theme_mode) setMode(p.theme_mode);
+        if (p?.theme_accent) setAccent(p.theme_accent);
       })
       .catch(console.error);
+  }, [userId]);
 
+  // Fetch edition data based on period selection
+  useEffect(() => {
+    if (!userId) return;
+    const effectivePeriod = canAccessArchives ? editionPeriod : "week";
+    if (effectivePeriod === "archive") {
+      fetchAllEditions(userId)
+        .then(setEditionsList)
+        .catch(console.error);
+      if (!selectedEditionId) {
+        setEditionData(null);
+        setEditionLoading(false);
+        return;
+      }
+      setEditionLoading(true);
+      fetchEditionById(userId, selectedEditionId)
+        .then(setEditionData)
+        .catch(console.error)
+        .finally(() => setEditionLoading(false));
+      return;
+    }
     setEditionLoading(true);
-    fetchLatestEdition(userId)
+    const offset = effectivePeriod === "week" ? 0 : effectivePeriod === "last" ? 1 : 2;
+    fetchEditionByOffset(userId, offset)
       .then(setEditionData)
       .catch(console.error)
       .finally(() => setEditionLoading(false));
-  }, [userId, dataVersion]);
+  }, [userId, dataVersion, editionPeriod, selectedEditionId, canAccessArchives]);
+
+  // Public entry route — accessible without auth
+  if (window.location.pathname.startsWith("/entry/")) {
+    return <PublicEntryView />;
+  }
+  if (window.location.pathname.startsWith("/edition/")) {
+    return <PublicEditionView />;
+  }
 
   // Loading state
   if (session === undefined) {
@@ -2998,16 +3716,46 @@ export default function App() {
         {view === "journal" ? (
           <JournalView C={C} userId={userId} onSwitchToEdition={() => setView("edition")} onNewEntry={() => setEditorOpen(true)} dataVersion={dataVersion} onOpenArticle={openArticle} />
         ) : view === "archives" ? (
-          <ArchivesView C={C} userId={userId} />
+          <ArchivesView
+            C={C}
+            userId={userId}
+            onSelectEdition={(id) => {
+              setSelectedEditionId(id);
+              setEditionPeriod("archive");
+            }}
+            onSwitchToEdition={() => setView("edition")}
+          />
         ) : view === "sections" ? (
           <SectionsView C={C} userId={userId} onOpenArticle={openArticle} />
         ) : view === "reflections" ? (
           <ReflectionsView C={C} userId={userId} />
         ) : (
         <div>
-        {editionLoading ? <LoadingBlock C={C} text="Loading latest edition..." /> : !editionData ? (
+        {editionLoading ? <LoadingBlock C={C} text="Loading edition..." /> : !editionData ? (
           <div style={{ textAlign: "center", padding: "80px 0" }}>
-            <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>No editions yet. Start writing!</p>
+            {editionPeriod === "archive" ? (
+              <div>
+                <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>
+                  {editionsList.length > 0 ? "Select an edition from the list above." : "No editions in archive yet."}
+                </p>
+                <button onClick={() => setEditionPeriod("week")} style={{
+                  marginTop: 16, fontFamily: F.sans, fontSize: 12, fontWeight: 500,
+                  color: C.ink, background: "none", border: `1px solid ${C.rule}`,
+                  padding: "8px 20px", cursor: "pointer",
+                }}>← Back to This Week</button>
+              </div>
+            ) : editionPeriod === "last" || editionPeriod === "month" ? (
+              <div>
+                <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>No edition for this period.</p>
+                <button onClick={() => setEditionPeriod("week")} style={{
+                  marginTop: 16, fontFamily: F.sans, fontSize: 12, fontWeight: 500,
+                  color: C.ink, background: "none", border: `1px solid ${C.rule}`,
+                  padding: "8px 20px", cursor: "pointer",
+                }}>← Back to This Week</button>
+              </div>
+            ) : (
+              <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>No editions yet. Start writing!</p>
+            )}
           </div>
         ) : (<>
         {/* MASTHEAD — inside edition view */}
@@ -3026,11 +3774,55 @@ export default function App() {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flex: 1 }}>
               <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{editionData.edition.number}</span>
               <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{editionData.edition.entryCount} entries</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                <button
+                  onClick={handleToggleEditionShare}
+                  disabled={shareSaving}
+                  style={{
+                    fontFamily: F.sans, fontSize: 10, fontWeight: 500,
+                    color: editionData.edition.is_public ? C.bg : C.inkMuted,
+                    backgroundColor: editionData.edition.is_public ? C.accent : "transparent",
+                    border: `1px solid ${editionData.edition.is_public ? C.accent : C.rule}`,
+                    padding: "4px 10px", cursor: shareSaving ? "default" : "pointer",
+                    opacity: shareSaving ? 0.7 : 1,
+                  }}
+                >
+                  {editionData.edition.is_public ? "Public" : "Make Public"}
+                </button>
+                {editionData.edition.is_public && (
+                  <button
+                    onClick={handleCopyEditionShareLink}
+                    style={{
+                      fontFamily: F.sans, fontSize: 10, fontWeight: 500,
+                      color: C.inkMuted, backgroundColor: "transparent",
+                      border: `1px solid ${C.rule}`,
+                      padding: "4px 10px", cursor: "pointer",
+                    }}
+                  >
+                    Copy Link
+                  </button>
+                )}
+              </div>
+              {shareToast && (
+                <span style={{ fontFamily: F.sans, fontSize: 10, color: C.accent, marginTop: 2 }}>
+                  {shareToast}
+                </span>
+              )}
             </div>
           </div>
         </header>
         <Ticker C={C} />
-        <EditionSwitcher C={C} />
+        <EditionSwitcher
+          C={C}
+          period={editionPeriod}
+          onPeriodChange={setEditionPeriod}
+          canAccessArchives={canAccessArchives}
+          editionsList={editionsList}
+          onSelectEdition={(id) => {
+            setSelectedEditionId(id);
+            setEditionPeriod("archive");
+          }}
+        />
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 340px", padding: "24px 0", animation: "fadeInUp 0.6s ease 0.2s both" }}>
           <div style={{ paddingRight: 28 }}>

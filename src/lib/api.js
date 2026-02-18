@@ -257,6 +257,40 @@ export async function fetchEditionEntriesFull(editionId) {
 }
 
 /**
+ * Fetches a single public entry by ID (no auth required).
+ * The RLS policy "Anyone can view public entries" allows this.
+ */
+export async function fetchPublicEntry(entryId) {
+  const { data, error } = await supabase
+    .from("entries")
+    .select(`
+      id, user_id, section, title_encrypted, body_encrypted, mood, is_public,
+      source, word_count, created_at, updated_at,
+      ai_edits(mode, tone, headline_encrypted, subhead_encrypted,
+        result_encrypted, original_encrypted, changes_count, applied),
+      attachments(type, url, metadata)
+    `)
+    .eq("id", entryId)
+    .eq("is_public", true)
+    .single();
+
+  if (error) throw error;
+  return decryptEntryFull(data);
+}
+
+/**
+ * Fetches the profile name for a user (public display).
+ */
+export async function fetchPublicProfile(userId) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("name, publication_name")
+    .eq("id", userId)
+    .single();
+  return data;
+}
+
+/**
  * Fetches entries and groups them by date for JournalView.
  * Returns array of { date: "Sunday, February 15", entries: [...] }
  */
@@ -288,51 +322,16 @@ export async function fetchJournal({ userId, from, to }) {
 // Editions
 // ---------------------------------------------------------------------------
 
-/**
- * Fetches the latest edition with its entries for EditionView.
- * Returns the full data object matching the MOCK structure.
- */
-export async function fetchLatestEdition(userId) {
-  // Get latest edition
-  const { data: edition, error: edError } = await supabase
-    .from("editions")
-    .select("*")
-    .eq("user_id", userId)
-    .order("week_start", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (edError) throw edError;
-
-  // Get edition entries
-  const { data: edEntries, error: eeError } = await supabase
-    .from("edition_entries")
-    .select("*, entry:entries(*)")
-    .eq("edition_id", edition.id)
-    .order("display_order", { ascending: true });
-
-  if (eeError) throw eeError;
-
-  // Decrypt
+async function buildEditionViewData(edition, decryptedEntries, userId) {
   const editorial = await decryptOptional(edition.editorial_encrypted);
-  const decryptedEntries = await Promise.all(
-    edEntries.map(async (ee) => {
-      const entry = await decryptEntry(ee.entry);
-      return { ...ee, entry };
-    })
-  );
-
-  // Get AI edit info for entries
   const entryIds = decryptedEntries.map((ee) => ee.entry.id);
   const { data: aiEdits } = await supabase
     .from("ai_edits")
     .select("entry_id, applied")
     .in("entry_id", entryIds)
     .eq("applied", true);
-
   const aiEditedSet = new Set((aiEdits || []).map((a) => a.entry_id));
 
-  // Build top stories (featured first, then by display_order)
   const topStories = decryptedEntries.map((ee) => {
     const e = ee.entry;
     return {
@@ -350,7 +349,6 @@ export async function fetchLatestEdition(userId) {
     };
   });
 
-  // Build briefing from entries (one note per day)
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const briefingMap = {};
@@ -367,7 +365,6 @@ export async function fetchLatestEdition(userId) {
     note: briefingMap[day] || "No entry this day.",
   }));
 
-  // Section counts
   const sectionCounts = {};
   for (const ee of decryptedEntries) {
     const sec = ee.entry.section;
@@ -375,7 +372,6 @@ export async function fetchLatestEdition(userId) {
     sectionCounts[label] = (sectionCounts[label] || 0) + 1;
   }
 
-  // Get global stats
   const { count: totalEntries } = await supabase
     .from("entries")
     .select("id", { count: "exact", head: true })
@@ -386,7 +382,6 @@ export async function fetchLatestEdition(userId) {
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId);
 
-  // Featured entries for top stories, rest for "more stories"
   const featured = topStories.filter((s) => s.isFeatured);
   const rest = topStories.filter((s) => !s.isFeatured);
 
@@ -400,6 +395,8 @@ export async function fetchLatestEdition(userId) {
       week_end: edition.week_end,
       number: `Vol. ${edition.volume} · No. ${edition.number}`,
       entryCount: edition.entry_count,
+      is_public: Boolean(edition.is_public),
+      share_mode: edition.share_mode || "cover",
     },
     topStories: featured.length >= 2 ? featured.slice(0, 2) : [...featured, ...rest].slice(0, 2),
     briefing,
@@ -422,6 +419,155 @@ export async function fetchLatestEdition(userId) {
       wordsThisWeek: edition.word_count,
     },
   };
+}
+
+async function fetchEditionRaw(userId, edition) {
+  const { data: edEntries, error: eeError } = await supabase
+    .from("edition_entries")
+    .select("*, entry:entries(*)")
+    .eq("edition_id", edition.id)
+    .order("display_order", { ascending: true });
+
+  if (eeError) throw eeError;
+
+  const decryptedEntries = await Promise.all(
+    edEntries.map(async (ee) => {
+      const entry = await decryptEntry(ee.entry);
+      return { ...ee, entry };
+    })
+  );
+
+  return buildEditionViewData(edition, decryptedEntries, userId);
+}
+
+/**
+ * Fetches the Nth most recent edition (0 = this week, 1 = last week, 2 = two weeks ago).
+ */
+export async function fetchEditionByOffset(userId, offset) {
+  const { data: editions, error } = await supabase
+    .from("editions")
+    .select("*")
+    .eq("user_id", userId)
+    .order("week_start", { ascending: false })
+    .range(offset, offset);
+
+  if (error) throw error;
+  if (!editions || editions.length === 0) return null;
+
+  return fetchEditionRaw(userId, editions[0]);
+}
+
+/**
+ * Fetches a specific edition by ID.
+ */
+export async function fetchEditionById(userId, editionId) {
+  const { data: edition, error } = await supabase
+    .from("editions")
+    .select("*")
+    .eq("id", editionId)
+    .eq("user_id", userId)
+    .single();
+
+  if (error) throw error;
+  if (!edition) return null;
+
+  return fetchEditionRaw(userId, edition);
+}
+
+/**
+ * Fetches the latest edition. Alias for fetchEditionByOffset(userId, 0).
+ */
+export async function fetchLatestEdition(userId) {
+  return fetchEditionByOffset(userId, 0);
+}
+
+/**
+ * Updates edition sharing flags.
+ */
+export async function updateEditionSharing(userId, editionId, { isPublic, shareMode }) {
+  const payload = {
+    is_public: Boolean(isPublic),
+    share_mode: shareMode || "cover",
+    shared_at: isPublic ? new Date().toISOString() : null,
+  };
+
+  const { data, error } = await supabase
+    .from("editions")
+    .update(payload)
+    .eq("id", editionId)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Fetches a public edition for sharing route.
+ * - cover mode: returns minimal cover data
+ * - full mode: returns edition data in the same shape as fetchLatestEdition
+ */
+export async function fetchPublicEdition(editionId) {
+  const { data: edition, error: edError } = await supabase
+    .from("editions")
+    .select("*")
+    .eq("id", editionId)
+    .eq("is_public", true)
+    .single();
+
+  if (edError) throw edError;
+  if (!edition) return null;
+
+  // Cover mode does not expose full entry reading.
+  if (edition.share_mode !== "full") {
+    return {
+      mode: "cover",
+      edition: {
+        id: edition.id,
+        volume: edition.volume,
+        num: edition.number,
+        week: formatWeekRange(edition.week_start, edition.week_end),
+        week_start: edition.week_start,
+        week_end: edition.week_end,
+        number: `Vol. ${edition.volume} · No. ${edition.number}`,
+        entryCount: edition.entry_count,
+      },
+      stats: {
+        totalEntries: edition.entry_count || 0,
+        thisEdition: edition.entry_count || 0,
+        editions: 1,
+        wordsThisWeek: edition.word_count || 0,
+      },
+      topStories: [],
+      briefing: [],
+      editorial: {
+        headline: "The Editor's Note",
+        content: "",
+      },
+      sections: [],
+      moreStories: [],
+    };
+  }
+
+  const { data: edEntries, error: eeError } = await supabase
+    .from("edition_entries")
+    .select("*, entry:entries(*)")
+    .eq("edition_id", edition.id)
+    .order("display_order", { ascending: true });
+  if (eeError) throw eeError;
+
+  const decryptedEntries = await Promise.all(
+    (edEntries || [])
+      .filter((ee) => ee.entry)
+      .map(async (ee) => {
+        const entry = await decryptEntry(ee.entry);
+        return { ...ee, entry };
+      })
+  );
+
+  const data = await buildEditionViewData(edition, decryptedEntries, edition.user_id);
+  return { ...data, mode: "full" };
 }
 
 // ---------------------------------------------------------------------------
