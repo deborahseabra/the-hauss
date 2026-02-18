@@ -1,0 +1,384 @@
+import { useState, useRef, useEffect } from "react";
+
+const F = {
+  display: "'Playfair Display', Georgia, serif",
+  body: "'Source Serif 4', Georgia, serif",
+  sans: "'IBM Plex Sans', -apple-system, sans-serif",
+  mono: "'IBM Plex Mono', monospace",
+};
+
+const C = {
+  bg: "#fff", ink: "#121212", inkLight: "#363636", inkMuted: "#727272",
+  inkFaint: "#999", rule: "#e2e2e2", ruleDark: "#121212",
+  accent: "#c41e1e", accentBg: "#fef5f5", sectionBg: "#f7f7f7",
+};
+
+const entries = [
+  { id: 1, day: 15, month: "Feb", time: "11:45 PM", section: "Personal Essay", title: "Clarice and the Hour of the Star", text: "Can't sleep. Started reading Clarice Lispector again — 'A Hora da Estrela.' Every sentence feels like she's writing directly to me, across decades. Underlined almost everything. There's a line about how we only become who we are at the moment we lose ourselves. I keep turning it over.", source: "app", wordCount: 284 },
+  { id: 2, day: 14, month: "Feb", time: "6:42 PM", section: "Dispatch", title: "Golden Hour From the Balcony", text: "Golden hour from the apartment balcony today. The light in São Paulo at this hour — it turns everything amber. Took 12 photos. Only kept one. It's the one where you can't tell what you're looking at. Just light and shadow and the edge of a building. That's the one that felt true.", source: "telegram", wordCount: 312 },
+  { id: 3, day: 14, month: "Feb", time: "12:15 PM", section: "Dispatch", title: null, text: "Lunch with Marina at the Italian place on Augusta. She told me she's moving to Lisbon in March. I felt three things at once: happy for her, jealous of her certainty, and relieved that someone close to me is also making a leap. We split the bill and she cried a little in the parking lot. I pretended I didn't notice, which is maybe what friends do.", source: "telegram", wordCount: 389 },
+  { id: 4, day: 13, month: "Feb", time: "9:30 PM", section: "Dispatch", title: "The Stroganoff Incident", text: "The mushroom stroganoff was, by any objective measure, a catastrophe. The mushrooms were somehow both overcooked and underflavored. The cream sauce separated. I ate it anyway, standing in the kitchen, because admitting defeat felt worse than the taste. Note to self: when the recipe says 'medium heat,' it means medium heat.", source: "app", wordCount: 267 },
+  { id: 5, day: 12, month: "Feb", time: "11:00 PM", section: "Personal Essay", title: "The Retention Model Breakthrough", text: "Breakthrough at work today. Finally cracked the retention model I've been wrestling with for weeks. The answer was embarrassingly simple — we were measuring the wrong moment. It's not about when people leave, it's about the last time they felt seen. Wrote up the whole thing in one sitting. 2,400 words. Felt electric.", source: "app", wordCount: 445 },
+  { id: 6, day: 12, month: "Feb", time: "7:30 AM", section: "Letter to Self", title: null, text: "Woke up before the alarm. First time this month. Lay there for ten minutes just listening to the city wake up. There's a specific sound São Paulo makes at 7am — traffic starting to hum, a dog barking somewhere in Pinheiros, the coffee shop downstairs pulling its metal gate up. It's not quiet, but it's a kind of peace.", source: "app", wordCount: 298 },
+  { id: 7, day: 11, month: "Feb", time: "8:15 PM", section: "Dispatch", title: null, text: "Nothing extraordinary happened today. Worked. Ate. Walked to the pharmacy and back. Watched the light change from the window. Sometimes I think the unremarkable days are the ones that hold everything together — the ordinary glue between the chapters. Today was glue. And that's okay.", source: "telegram", wordCount: 201 },
+  { id: 8, day: 10, month: "Feb", time: "10:20 PM", section: "Personal Essay", title: "On Permission", text: "I've been thinking about permission. Not the kind you ask for — the kind you give yourself. Permission to leave a job that looks good on paper. Permission to feel jealous of a friend. Permission to eat bad stroganoff standing in the kitchen at midnight. Permission to keep only one photo out of twelve. I've spent most of my life waiting for someone to tell me it's okay.", source: "app", wordCount: 378 },
+  { id: 9, day: 9, month: "Feb", time: "6:00 AM", section: "Letter to Self", title: "To the Version of Me Who's Still Afraid", text: "Dear future me — if you're reading this and you haven't done the thing yet, remember this morning. You woke up knowing. The knowing is quiet but it's there. Don't let the noise of everyone else's opinions drown it out. You know what you need to do. The fear doesn't go away. You just learn to walk with it.", source: "app", wordCount: 334 },
+];
+
+const SECTION_LABELS = { "Personal Essay": "PERSONAL ESSAY", "Dispatch": "DISPATCH", "Letter to Self": "LETTER TO SELF", "Review": "REVIEW", "Photo Essay": "PHOTO ESSAY" };
+
+const SECTIONS = [
+  { key: "all", label: "All Sections", count: 9 },
+  { key: "Personal Essay", label: "Personal Essays", count: 4 },
+  { key: "Dispatch", label: "Dispatches", count: 4 },
+  { key: "Letter to Self", label: "Letters to Self", count: 2 },
+  { key: "Review", label: "Reviews", count: 0 },
+];
+
+const PRESETS = [
+  { key: "this-week", label: "This Week", range: "Feb 16–22" },
+  { key: "last-week", label: "Last Week", range: "Feb 9–15" },
+  { key: "this-month", label: "This Month", range: "February" },
+  { key: "last-30", label: "Last 30 Days", range: "Jan 19 – Feb 18" },
+];
+
+function Dropdown({ trigger, open, onToggle, children, dropRef, width = 280 }) {
+  return (
+    <div ref={dropRef} style={{ position: "relative" }}>
+      <button onClick={onToggle} style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+        backgroundColor: "transparent",
+        border: `1px solid ${open ? C.ink : C.rule}`,
+        padding: "4px 12px", cursor: "pointer",
+        transition: "border-color 0.15s",
+      }}>
+        {trigger}
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke={C.inkMuted} strokeWidth="1.5" strokeLinecap="round">
+          <path d={open ? "M2 6.5L5 3.5L8 6.5" : "M2 3.5L5 6.5L8 3.5"} />
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", left: 0,
+          width, backgroundColor: C.bg,
+          border: `1px solid ${C.rule}`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+          zIndex: 100, animation: "fadeIn 0.15s ease",
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function NotebookView() {
+  const [viewMode, setViewMode] = useState("list");
+  const [spread, setSpread] = useState(0);
+  const [selectedPeriod, setSelectedPeriod] = useState("last-week");
+  const [selectedSection, setSelectedSection] = useState("all");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [sectionOpen, setSectionOpen] = useState(false);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const pickerRef = useRef(null);
+  const sectionRef = useRef(null);
+
+  const totalSpreads = Math.ceil(entries.length / 2);
+  const readTime = (wc) => Math.max(1, Math.ceil(wc / 230));
+  const pad = (n) => n.toString().padStart(2, "0");
+
+  const leftEntry = entries[spread * 2];
+  const rightEntry = entries[spread * 2 + 1] || null;
+
+  const currentPreset = PRESETS.find(p => p.key === selectedPeriod);
+  const titleLabel = currentPreset ? currentPreset.label : `${customFrom} – ${customTo}`;
+  const rangeShort = currentPreset ? currentPreset.range : `${customFrom} – ${customTo}`;
+  const currentSection = SECTIONS.find(s => s.key === selectedSection);
+  const sectionLabel = currentSection ? currentSection.label : "All Sections";
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false);
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 24px", fontFamily: F.sans, backgroundColor: C.bg, minHeight: "100vh" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono&display=swap');
+        @keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+        * { margin:0; padding:0; box-sizing:border-box; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ padding: "40px 0 8px", textAlign: "center" }}>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Notebook</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink }}>{titleLabel}</h2>
+        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginTop: 6 }}>
+          9 entries · 2,908 words
+        </p>
+      </div>
+
+      {/* Controls bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, padding: "12px 0", marginBottom: 32, marginTop: 20 }}>
+        {/* Left: dropdowns */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Section dropdown */}
+          <Dropdown
+            dropRef={sectionRef}
+            trigger={sectionLabel}
+            open={sectionOpen}
+            onToggle={() => { setSectionOpen(!sectionOpen); setPickerOpen(false); }}
+            width={220}
+          >
+            <div style={{ padding: "6px 0" }}>
+              {SECTIONS.map((s) => (
+                <button key={s.key} onClick={() => { setSelectedSection(s.key); setSectionOpen(false); }} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  width: "100%", padding: "10px 16px",
+                  backgroundColor: "transparent", border: "none", cursor: "pointer",
+                  borderLeft: selectedSection === s.key ? `3px solid ${C.accent}` : "3px solid transparent",
+                  transition: "background-color 0.1s",
+                }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = C.sectionBg}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                >
+                  <span style={{
+                    fontFamily: F.sans, fontSize: 13,
+                    fontWeight: selectedSection === s.key ? 600 : 400,
+                    color: s.count === 0 ? C.inkFaint : C.ink,
+                  }}>{s.label}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{s.count}</span>
+                </button>
+              ))}
+            </div>
+          </Dropdown>
+
+          {/* Date picker dropdown */}
+          <Dropdown
+            dropRef={pickerRef}
+            trigger={<span style={{ fontFamily: F.mono }}>{rangeShort}</span>}
+            open={pickerOpen}
+            onToggle={() => { setPickerOpen(!pickerOpen); setSectionOpen(false); }}
+            width={320}
+          >
+            <div style={{ padding: "6px 0" }}>
+              {PRESETS.map((p) => (
+                <button key={p.key} onClick={() => { setSelectedPeriod(p.key); setPickerOpen(false); }} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  width: "100%", padding: "11px 16px",
+                  backgroundColor: "transparent", border: "none", cursor: "pointer",
+                  borderLeft: selectedPeriod === p.key ? `3px solid ${C.accent}` : "3px solid transparent",
+                  transition: "background-color 0.1s",
+                }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = C.sectionBg}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                >
+                  <span style={{
+                    fontFamily: F.sans, fontSize: 13,
+                    fontWeight: selectedPeriod === p.key ? 600 : 400,
+                    color: C.ink,
+                  }}>{p.label}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>{p.range}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ height: 1, backgroundColor: C.rule }} />
+            <div style={{ padding: "14px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={C.inkMuted} strokeWidth="1.3">
+                  <rect x="1" y="2" width="10" height="9" rx="1.5"/>
+                  <line x1="1" y1="5" x2="11" y2="5"/>
+                  <line x1="3.5" y1="0.5" x2="3.5" y2="3"/>
+                  <line x1="8.5" y1="0.5" x2="8.5" y2="3"/>
+                </svg>
+                <span style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px" }}>Custom Range</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>From</label>
+                  <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={{
+                    width: "100%", padding: "7px 8px",
+                    fontFamily: F.sans, fontSize: 11, color: C.ink,
+                    border: `1px solid ${C.rule}`, backgroundColor: C.bg, outline: "none",
+                  }} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>To</label>
+                  <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={{
+                    width: "100%", padding: "7px 8px",
+                    fontFamily: F.sans, fontSize: 11, color: C.ink,
+                    border: `1px solid ${C.rule}`, backgroundColor: C.bg, outline: "none",
+                  }} />
+                </div>
+              </div>
+              <button onClick={() => { setSelectedPeriod("custom"); setPickerOpen(false); }} style={{
+                width: "100%", marginTop: 10, padding: "8px 0",
+                fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                color: C.bg, backgroundColor: C.ink,
+                border: "none", cursor: "pointer",
+              }}>Apply</button>
+            </div>
+          </Dropdown>
+        </div>
+
+        {/* Right: view toggle */}
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => setViewMode("list")} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "list" ? C.ink : C.rule}`,
+            opacity: viewMode === "list" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <line x1="1" y1="3" x2="15" y2="3"/><line x1="1" y1="8" x2="15" y2="8"/><line x1="1" y1="13" x2="15" y2="13"/>
+            </svg>
+          </button>
+          <button onClick={() => { setViewMode("notebook"); setSpread(0); }} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "notebook" ? C.ink : C.rule}`,
+            opacity: viewMode === "notebook" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <rect x="1" y="2" width="6" height="12"/><rect x="9" y="2" width="6" height="12"/>
+              <line x1="8" y1="2" x2="8" y2="14"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* ===== LIST VIEW ===== */}
+      {viewMode === "list" && (
+        <div>
+          {entries.map((entry, i) => (
+            <div key={entry.id} style={{
+              display: "grid", gridTemplateColumns: "72px 1fr", gap: 0,
+              padding: "28px 0", borderBottom: `1px solid ${C.rule}`,
+              cursor: "pointer", animation: `fadeInUp 0.4s ease ${i * 0.04}s both`,
+              transition: "background-color 0.15s",
+            }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = C.sectionBg}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+            >
+              <div style={{ textAlign: "right", paddingRight: 16, borderRight: `2px solid ${C.rule}` }}>
+                <div style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, color: C.ink, lineHeight: 1 }}>
+                  {pad(entry.day)}
+                </div>
+                <div style={{ fontFamily: F.display, fontSize: 13, fontWeight: 600, color: C.inkMuted, marginTop: 2 }}>
+                  {entry.month}
+                </div>
+                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 6 }}>
+                  {entry.time}
+                </div>
+              </div>
+              <div style={{ paddingLeft: 20 }}>
+                <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>
+                  {SECTION_LABELS[entry.section]}
+                </div>
+                {entry.title && (
+                  <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.25, color: C.ink, marginBottom: 8 }}>
+                    {entry.title}
+                  </h3>
+                )}
+                <p style={{
+                  fontFamily: F.body, fontSize: 14, fontStyle: "italic", lineHeight: 1.65, color: C.inkMuted,
+                  marginBottom: 10,
+                  display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+                }}>
+                  {entry.text}
+                </p>
+                <div style={{ display: "flex", gap: 12, fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+                  <span>{entry.wordCount} words</span>
+                  {entry.source === "telegram" && <span>via Telegram</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ===== NOTEBOOK VIEW ===== */}
+      {viewMode === "notebook" && (
+        <div style={{ animation: "fadeIn 0.3s ease" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: rightEntry ? "1fr 1px 1fr" : "1fr",
+            gap: 0, minHeight: 480,
+          }}>
+            <div style={{ padding: "8px 32px 32px 0" }}>
+              <NotebookPage entry={leftEntry} readTime={readTime} pad={pad} />
+            </div>
+            {rightEntry && <div style={{ backgroundColor: C.rule }} />}
+            {rightEntry && (
+              <div style={{ padding: "8px 0 32px 32px" }}>
+                <NotebookPage entry={rightEntry} readTime={readTime} pad={pad} />
+              </div>
+            )}
+          </div>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            borderTop: `1px solid ${C.rule}`, padding: "16px 0", marginTop: 8,
+          }}>
+            <button onClick={() => setSpread(s => Math.max(0, s - 1))} style={{
+              fontFamily: F.sans, fontSize: 11, color: spread === 0 ? C.inkFaint : C.inkMuted,
+              backgroundColor: "transparent", border: "none",
+              cursor: spread === 0 ? "default" : "pointer", padding: "4px 0",
+            }}>{spread > 0 ? "← Previous" : ""}</button>
+            <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>
+              {spread * 2 + 1}–{Math.min(spread * 2 + 2, entries.length)} of {entries.length}
+            </span>
+            <button onClick={() => setSpread(s => Math.min(totalSpreads - 1, s + 1))} style={{
+              fontFamily: F.sans, fontSize: 11, color: spread >= totalSpreads - 1 ? C.inkFaint : C.inkMuted,
+              backgroundColor: "transparent", border: "none",
+              cursor: spread >= totalSpreads - 1 ? "default" : "pointer", padding: "4px 0",
+            }}>{spread < totalSpreads - 1 ? "Next →" : ""}</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ height: 60 }} />
+    </div>
+  );
+}
+
+function NotebookPage({ entry, readTime, pad }) {
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 20 }}>
+        <div>
+          <span style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pad(entry.day)}</span>
+          <span style={{ fontFamily: F.display, fontSize: 12, fontWeight: 600, color: C.inkMuted, marginLeft: 6 }}>{entry.month}</span>
+        </div>
+        <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{entry.time}</span>
+      </div>
+      <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 10 }}>
+        {SECTION_LABELS[entry.section]}
+      </div>
+      {entry.title && (
+        <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.25, color: C.ink, marginBottom: 14 }}>
+          {entry.title}
+        </h3>
+      )}
+      {entry.text.split("\n\n").map((para, pi) => (
+        <p key={pi} style={{ fontFamily: F.body, fontSize: 16, lineHeight: 1.8, color: C.inkLight, marginBottom: 14 }}>{para}</p>
+      ))}
+      <div style={{
+        display: "flex", gap: 8, alignItems: "center",
+        marginTop: 20, paddingTop: 12, borderTop: `1px solid ${C.rule}`,
+      }}>
+        <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+          {entry.wordCount} words · {readTime(entry.wordCount)} min
+        </span>
+        {entry.source === "telegram" && (
+          <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>· via Telegram</span>
+        )}
+      </div>
+    </div>
+  );
+}

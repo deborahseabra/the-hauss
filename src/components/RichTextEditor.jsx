@@ -13,7 +13,8 @@ const F = {
   sans: "'IBM Plex Sans', -apple-system, sans-serif",
 };
 
-function ToolbarButton({ active, onClick, children, title }) {
+function ToolbarButton({ active, onClick, children, title, fgActive, fgInactive }) {
+  const fg = active ? fgActive : fgInactive;
   return (
     <button
       type="button"
@@ -22,8 +23,7 @@ function ToolbarButton({ active, onClick, children, title }) {
       style={{
         background: "none", border: "none", cursor: "pointer",
         padding: "6px 8px", display: "flex", alignItems: "center",
-        color: active ? "#fff" : "rgba(255,255,255,0.6)",
-        borderRadius: 2, transition: "color 0.15s",
+        color: fg, borderRadius: 2, transition: "color 0.15s",
       }}
     >
       {children}
@@ -31,7 +31,7 @@ function ToolbarButton({ active, onClick, children, title }) {
   );
 }
 
-function FloatingToolbar({ editor, containerRef }) {
+function FloatingToolbar({ editor, containerRef, C }) {
   const [pos, setPos] = useState(null);
   const [linkMode, setLinkMode] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
@@ -69,6 +69,11 @@ function FloatingToolbar({ editor, containerRef }) {
 
   if (!pos || !editor) return null;
 
+  const isDark = C.bg === "#111" || C.bg === "#0a0a0a";
+  const tBar = isDark
+    ? { bg: "#2e2e2e", fgActive: "#ffffff", fgInactive: "rgba(255,255,255,0.7)", divider: "rgba(255,255,255,0.2)", inputBg: "rgba(255,255,255,0.08)", inputBorder: "rgba(255,255,255,0.25)" }
+    : { bg: C.sectionBg, fgActive: C.ink, fgInactive: C.inkMuted, divider: C.rule, inputBg: "rgba(0,0,0,0.06)", inputBorder: C.rule };
+
   return (
     <div style={{
       position: "absolute", top: pos.top, left: pos.left, transform: "translateX(-50%)",
@@ -77,7 +82,7 @@ function FloatingToolbar({ editor, containerRef }) {
       {linkMode ? (
         <div style={{
           display: "flex", alignItems: "center", gap: 4, padding: "4px 6px",
-          backgroundColor: "#1a1a1a", borderRadius: 6, boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
+          backgroundColor: tBar.bg, borderRadius: 6, boxShadow: isDark ? "0 4px 20px rgba(0,0,0,0.25)" : "0 2px 12px rgba(0,0,0,0.08)", border: isDark ? "none" : `1px solid ${tBar.divider}`,
         }}>
           <input
             ref={linkInputRef}
@@ -86,46 +91,46 @@ function FloatingToolbar({ editor, containerRef }) {
             placeholder="https://..."
             style={{
               width: 200, padding: "4px 8px", fontSize: 12, fontFamily: F.sans,
-              backgroundColor: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-              color: "#fff", outline: "none", borderRadius: 2,
+              backgroundColor: tBar.inputBg, border: `1px solid ${tBar.inputBorder}`,
+              color: tBar.fgActive, outline: "none", borderRadius: 2,
             }}
           />
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); handleLinkSubmit(); }} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", padding: "4px 6px" }}>
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); handleLinkSubmit(); }} style={{ background: "none", border: "none", color: tBar.fgActive, cursor: "pointer", padding: "4px 6px" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
           </button>
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); setLinkMode(false); editor.chain().focus().run(); }} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", padding: "4px 6px" }}>
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); setLinkMode(false); editor.chain().focus().run(); }} style={{ background: "none", border: "none", color: tBar.fgInactive, cursor: "pointer", padding: "4px 6px" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
       ) : (
         <div style={{
           display: "flex", alignItems: "center", gap: 0,
-          backgroundColor: "#1a1a1a", borderRadius: 6, padding: "2px 4px",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
+          backgroundColor: tBar.bg, borderRadius: 6, padding: "2px 4px",
+          boxShadow: isDark ? "0 4px 20px rgba(0,0,0,0.25)" : "0 2px 12px rgba(0,0,0,0.08)", border: isDark ? "none" : `1px solid ${tBar.divider}`,
         }}>
-          <ToolbarButton active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()} title="Bold">
+          <ToolbarButton active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()} title="Bold" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <span style={{ fontWeight: 700, fontSize: 14, fontFamily: F.body }}>B</span>
           </ToolbarButton>
-          <ToolbarButton active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()} title="Italic">
+          <ToolbarButton active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()} title="Italic" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <span style={{ fontStyle: "italic", fontSize: 14, fontFamily: F.body }}>i</span>
           </ToolbarButton>
-          <ToolbarButton active={editor.isActive("underline")} onClick={() => editor.chain().focus().toggleUnderline().run()} title="Underline">
+          <ToolbarButton active={editor.isActive("underline")} onClick={() => editor.chain().focus().toggleUnderline().run()} title="Underline" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <span style={{ textDecoration: "underline", fontSize: 14, fontFamily: F.body }}>U</span>
           </ToolbarButton>
-          <ToolbarButton active={editor.isActive("link")} onClick={() => { if (editor.isActive("link")) { editor.chain().focus().unsetLink().run(); } else { setLinkUrl(editor.getAttributes("link").href || ""); setLinkMode(true); } }} title="Link">
+          <ToolbarButton active={editor.isActive("link")} onClick={() => { if (editor.isActive("link")) { editor.chain().focus().unsetLink().run(); } else { setLinkUrl(editor.getAttributes("link").href || ""); setLinkMode(true); } }} title="Link" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
           </ToolbarButton>
-          <div style={{ width: 1, height: 18, backgroundColor: "rgba(255,255,255,0.15)", margin: "0 2px" }} />
-          <ToolbarButton active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="Heading">
+          <div style={{ width: 1, height: 18, backgroundColor: tBar.divider, margin: "0 2px" }} />
+          <ToolbarButton active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="Heading" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <span style={{ fontWeight: 700, fontSize: 14, fontFamily: F.sans }}>H</span>
           </ToolbarButton>
-          <ToolbarButton active={editor.isActive("heading", { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} title="Subheading">
+          <ToolbarButton active={editor.isActive("heading", { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} title="Subheading" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <span style={{ fontWeight: 600, fontSize: 12, fontFamily: F.sans }}>h</span>
           </ToolbarButton>
-          <ToolbarButton active={editor.isActive("blockquote")} onClick={() => editor.chain().focus().toggleBlockquote().run()} title="Quote">
+          <ToolbarButton active={editor.isActive("blockquote")} onClick={() => editor.chain().focus().toggleBlockquote().run()} title="Quote" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/></svg>
           </ToolbarButton>
-          <ToolbarButton active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()} title="List">
+          <ToolbarButton active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()} title="List" fgActive={tBar.fgActive} fgInactive={tBar.fgInactive}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="3" cy="12" r="1" fill="currentColor"/><circle cx="3" cy="18" r="1" fill="currentColor"/></svg>
           </ToolbarButton>
         </div>
@@ -232,6 +237,14 @@ export default function RichTextEditor({ value, onChange, placeholder, C, onUplo
     if (editor && onChange._setEditor) onChange._setEditor(editor);
   }, [editor, onChange]);
 
+  // Sync content when parent sets new value (e.g. after AI Apply)
+  useEffect(() => {
+    if (!editor) return;
+    const next = value || "";
+    const current = editor.getHTML();
+    if (next !== current) editor.commands.setContent(next, false);
+  }, [editor, value]);
+
   useEffect(() => {
     if (!editor) return;
     const handleSelectionUpdate = () => {
@@ -282,7 +295,7 @@ export default function RichTextEditor({ value, onChange, placeholder, C, onUplo
         onChange={handleImageUpload}
       />
 
-      <FloatingToolbar editor={editor} containerRef={containerRef} />
+      <FloatingToolbar editor={editor} containerRef={containerRef} C={C} />
 
       {plusMenuPos && (
         <PlusMenu

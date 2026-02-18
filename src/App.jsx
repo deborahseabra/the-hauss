@@ -17,6 +17,14 @@ import {
   updateProfile,
   fetchEntriesFull,
   fetchEditionEntriesFull,
+  ARTICLE_SECTION_LABELS,
+  SECTION_LABELS,
+  SECTION_UPPER,
+  getReadTime,
+  isEntrySealed,
+  fetchNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
   fetchPrompts,
   updatePrompt,
   uploadAttachment,
@@ -465,7 +473,9 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
   const isEdit = Boolean(initialEntry);
   const [text, setText] = useState(isEdit ? (initialEntry.body || "") : "");
   const [title, setTitle] = useState(isEdit ? (initialEntry.title || "") : "");
+  const [subhead, setSubhead] = useState(isEdit ? (initialEntry.subhead || "") : "");
   const [section, setSection] = useState(isEdit ? (initialEntry.section || "dispatch") : "dispatch");
+  const [letterOpenAt, setLetterOpenAt] = useState(isEdit && initialEntry.letter_open_at ? initialEntry.letter_open_at.slice(0, 10) : "");
   const [mood, setMood] = useState(isEdit ? initialEntry.mood ?? null : null);
   const [isPublic, setIsPublic] = useState(isEdit ? (initialEntry.is_public || false) : false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -476,6 +486,7 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
   const [pendingAttachments, setPendingAttachments] = useState([]);
   const [attachPanel, setAttachPanel] = useState(null); // null | 'location' | 'link'
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [headlineLoading, setHeadlineLoading] = useState(false);
   const editorRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -535,10 +546,35 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
     setPendingAttachments((prev) => prev.map((a, i) => i === index ? { ...a, metadata: { ...a.metadata, caption } } : a));
   };
 
+  const handleSuggestHeadline = useCallback(async () => {
+    const bodyText = editorRef.current ? editorRef.current.getText() : text.replace(/<[^>]*>/g, "");
+    if (!bodyText.trim() || bodyText.trim().length < 20) return;
+    setHeadlineLoading(true);
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/ai-editor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
+        body: JSON.stringify({ text: bodyText, mode: "headline" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to generate headline");
+      }
+      const data = await res.json();
+      if (data.headline) setTitle(data.headline);
+    } catch (err) {
+      console.error("Headline suggestion error:", err);
+    } finally {
+      setHeadlineLoading(false);
+    }
+  }, [session?.access_token, text]);
+
   const handleApplyAi = (result) => {
     const toHtml = (t) => t.split("\n\n").filter(Boolean).map((p) => `<p>${p}</p>`).join("");
     if (result.mode === "rewrite") {
       if (result.headline) setTitle(result.headline);
+      if (result.subhead) setSubhead(result.subhead);
       setText(toHtml(result.body));
       if (result.tone === "intimate") setSection("essay");
       if (result.tone === "literary") setSection("essay");
@@ -559,10 +595,12 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
           entryId: initialEntry.id,
           userId,
           title: title.trim() || null,
+          subhead: subhead.trim() || null,
           body: text,
           section,
           mood,
           isPublic,
+          letterOpenAt: section === "letter" && letterOpenAt ? letterOpenAt : null,
         });
         if (pendingAttachments.length > 0) {
           await createAttachments(initialEntry.id, userId, pendingAttachments);
@@ -574,11 +612,13 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
         const entry = await createEntry({
           userId,
           title: title.trim() || null,
+          subhead: subhead.trim() || null,
           body: text,
           section,
           mood,
           isPublic,
           source: "app",
+          letterOpenAt: section === "letter" && letterOpenAt ? letterOpenAt : null,
         });
         if (pendingAttachments.length > 0) {
           await createAttachments(entry.id, userId, pendingAttachments);
@@ -603,21 +643,25 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
   const moods = [{ e: "☀️", l: "Bright" }, { e: "🌤", l: "Calm" }, { e: "🌧", l: "Heavy" }, { e: "⚡", l: "Electric" }, { e: "🌙", l: "Reflective" }];
 
   if (showSuccess) return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 2000, backgroundColor: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.4s ease" }}>
-      <div style={{ fontSize: 40, marginBottom: 20, color: C.accent }}>✦</div>
-      <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{isEdit ? "Saved" : "Published"}</h2>
-      <p style={{ fontFamily: F.body, fontSize: 16, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>{isEdit ? "Your changes have been saved." : "Your entry will appear in this week's edition."}</p>
-      {!isEdit && isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.accent, marginBottom: 24 }}>🌐 Visible at thehauss.me/deborah</p>}
-      {!isEdit && !isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint, marginBottom: 24 }}>🔒 Private — only you can see this</p>}
-      <div style={{ display: "flex", gap: 12 }}>
-        {!isEdit && <button onClick={() => { setShowSuccess(false); setText(""); setTitle(""); setMood(null); setAiKey(k => k + 1); }} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.inkMuted, border: `1px solid ${C.rule}`, backgroundColor: "transparent", padding: "10px 24px", cursor: "pointer" }}>Write Another</button>}
-        <button onClick={onClose} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "10px 24px", cursor: "pointer" }}>{isEdit ? "Back" : "Back to Edition"}</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 2000, backgroundColor: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.2s ease" }}>
+      <div style={{
+        backgroundColor: C.surface, maxWidth: 380, width: "90%", padding: 32, boxShadow: "0 12px 48px rgba(0,0,0,0.15)", border: `1px solid ${C.rule}`, animation: "fadeIn 0.25s ease",
+      }}>
+        <div style={{ fontSize: 36, marginBottom: 16, color: C.accent }}>✦</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{isEdit ? "Saved" : "Published"}</h2>
+        <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>{isEdit ? "Your changes have been saved." : "Your entry will appear in this week's edition."}</p>
+        {!isEdit && isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.accent, marginBottom: 24 }}>🌐 Visible at thehauss.me/deborah</p>}
+        {!isEdit && !isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint, marginBottom: 24 }}>🔒 Private — only you can see this</p>}
+        <div style={{ display: "flex", gap: 10, marginTop: 24, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.inkMuted, border: `1px solid ${C.rule}`, backgroundColor: "transparent", padding: "10px 24px", cursor: "pointer" }}>Close</button>
+          <button onClick={() => { setShowSuccess(false); setText(""); setTitle(""); setSubhead(""); setMood(null); setAiKey(k => k + 1); }} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "10px 24px", cursor: "pointer" }}>Write Another</button>
+        </div>
       </div>
     </div>
   );
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 2000, backgroundColor: C.bg, display: "flex", flexDirection: "column", animation: "editorSlideIn 0.35s ease" }}>
+    <div data-editor-root style={{ position: "fixed", inset: 0, zIndex: 2000, backgroundColor: C.bg, display: "flex", flexDirection: "column", animation: "editorSlideIn 0.35s ease" }}>
       {/* HEADER */}
       <div style={{ borderBottom: `1px solid ${C.rule}`, padding: "0 32px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -663,9 +707,34 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
                 {secs.find(s => s.key === section)?.label}
                 {isPublic && <span style={{ marginLeft: 8, color: C.inkFaint, fontWeight: 400 }}>· Public</span>}
               </div>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Headline" style={{
-                width: "100%", border: "none", outline: "none", fontFamily: F.display, fontSize: 32, fontWeight: 700,
-                color: C.ink, backgroundColor: "transparent", lineHeight: 1.2, marginBottom: 8, padding: 0,
+              <div style={{ position: "relative", marginBottom: 8 }}>
+                <textarea value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Headline" rows={1} style={{
+                  width: "100%", border: "none", outline: "none", fontFamily: F.display, fontSize: 32, fontWeight: 700,
+                  color: C.ink, backgroundColor: "transparent", lineHeight: 1.2, padding: 0, paddingRight: 32,
+                  resize: "none", minHeight: 40, overflow: "hidden",
+                }} />
+                {session && plainText.trim().length >= 20 && (
+                  <button
+                    onClick={handleSuggestHeadline}
+                    disabled={headlineLoading}
+                    title="Suggest headline with AI"
+                    style={{
+                      position: "absolute", top: "50%", right: 0, transform: "translateY(-50%)",
+                      background: "none", border: "none", cursor: headlineLoading ? "default" : "pointer",
+                      padding: 4, opacity: headlineLoading ? 0.5 : 0.35,
+                      fontFamily: F.sans, fontSize: 12, color: C.inkMuted,
+                      transition: "opacity 0.2s",
+                    }}
+                    onMouseEnter={(e) => { if (!headlineLoading) e.currentTarget.style.opacity = "0.8"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = headlineLoading ? "0.5" : "0.35"; }}
+                  >
+                    {headlineLoading ? "…" : "✦"}
+                  </button>
+                )}
+              </div>
+              <input value={subhead} onChange={(e) => setSubhead(e.target.value)} placeholder="Subtitle (optional)" style={{
+                width: "100%", border: "none", outline: "none", fontFamily: F.body, fontSize: 15, fontStyle: "italic",
+                color: C.inkLight, backgroundColor: "transparent", lineHeight: 1.5, padding: 0, marginBottom: 8,
               }} />
               <div style={{ height: 2, backgroundColor: C.ink, width: 60, marginBottom: 28 }} />
               <RichTextEditor
@@ -699,6 +768,24 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
                 </button>
               ))}
             </div>
+
+            {/* Letter open date — only when section is Letter to Self */}
+            {section === "letter" && (
+              <div style={{ padding: "24px 20px", borderBottom: `1px solid ${C.rule}` }}>
+                <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 12 }}>Open on date</div>
+                <p style={{ fontFamily: F.body, fontSize: 11, color: C.inkMuted, marginBottom: 10, fontStyle: "italic" }}>Optional. Your letter stays hidden until this date. You'll get an email and in-app notification when it opens.</p>
+                <input
+                  type="date"
+                  value={letterOpenAt}
+                  onChange={(e) => setLetterOpenAt(e.target.value)}
+                  min={new Date().toISOString().slice(0, 10)}
+                  style={{ width: "100%", padding: "8px 10px", fontFamily: F.sans, fontSize: 12, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }}
+                />
+                {letterOpenAt && (
+                  <button onClick={() => setLetterOpenAt("")} style={{ marginTop: 6, fontFamily: F.sans, fontSize: 10, color: C.inkFaint, background: "none", border: "none", cursor: "pointer" }}>Clear date</button>
+                )}
+              </div>
+            )}
 
             {/* Visibility */}
             <div style={{ padding: "24px 20px", borderBottom: `1px solid ${C.rule}` }}>
@@ -794,41 +881,60 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
 }
 
 // ============================================================
-// SETTINGS
+// SETTINGS — App: theme, accent, integrations, plan, security
 // ============================================================
-function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, pubName, setPubName, motto, setMotto, city, setCity, userId }) {
-  const [ln, setLn] = useState(pubName);
-  const [lm, setLm] = useState(motto);
-  const [lc, setLc] = useState(city);
+function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, userId, profile, session }) {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
-  useEffect(() => { setLn(pubName); setLm(motto); setLc(city); }, [pubName, motto, city]);
+  const [pwDialogOpen, setPwDialogOpen] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwToast, setPwToast] = useState(null);
   if (!isOpen) return null;
 
-  const save = async () => {
+  const saveAppearance = async () => {
     setSaving(true);
     setToast(null);
     try {
-      await updateProfile(userId, {
-        publication_name: ln,
-        motto: lm,
-        city: lc,
-        theme_mode: mode,
-        theme_accent: accent,
-      });
-      setPubName(ln);
-      setMotto(lm);
-      setCity(lc);
+      await updateProfile(userId, { theme_mode: mode, theme_accent: accent });
       setToast("success");
-      setTimeout(() => {
-        setToast(null);
-        onClose();
-      }, 1200);
+      setTimeout(() => setToast(null), 2000);
     } catch (err) {
       console.error("Failed to save settings:", err);
       setToast("error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const savePassword = async () => {
+    if (pwNew !== pwConfirm) {
+      setPwToast("Passwords do not match.");
+      return;
+    }
+    if (!pwCurrent || !pwNew) return;
+    setPwSaving(true);
+    setPwToast(null);
+    try {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: session?.user?.email, password: pwCurrent });
+      if (signInErr) {
+        setPwToast("Current password is incorrect.");
+        return;
+      }
+      const { error } = await supabase.auth.updateUser({ password: pwNew });
+      if (error) throw error;
+      setPwCurrent("");
+      setPwNew("");
+      setPwConfirm("");
+      setPwToast("success");
+      setTimeout(() => { setPwToast(null); setPwDialogOpen(false); }, 1500);
+    } catch (err) {
+      console.error("Password update failed:", err);
+      setPwToast(err?.message || "Failed to update. Try again.");
+    } finally {
+      setPwSaving(false);
     }
   };
 
@@ -838,7 +944,7 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
         <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.rule}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <h2 style={{ fontFamily: F.display, fontSize: 20, fontWeight: 600, color: C.ink }}>Settings</h2>
-            <p style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, marginTop: 2 }}>Customize your publication</p>
+            <p style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, marginTop: 2 }}>Theme, integrations, plan, and account</p>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkMuted, fontSize: 18 }}>✕</button>
         </div>
@@ -851,14 +957,14 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
               { k: "light", l: "Light", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg> },
               { k: "dark", l: "Dark", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg> },
             ].map((t) => (
-              <button key={t.k} onClick={() => setMode(t.k)} style={{ flex: 1, padding: "8px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, backgroundColor: mode === t.k ? C.sectionBg : "transparent", border: mode === t.k ? `1.5px solid ${C.ink}` : `1px solid ${C.rule}`, cursor: "pointer", marginLeft: t.k === "dark" ? -1 : 0, color: mode === t.k ? C.ink : C.inkMuted }}>
+              <button key={t.k} onClick={() => setMode(t.k)} style={{ flex: 1, padding: "8px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, backgroundColor: mode === t.k ? C.sectionBg : "transparent", border: mode === t.k ? `1.5px solid ${C.ink}` : `1px solid ${C.rule}`, cursor: "pointer", marginLeft: t.k === "dark" ? -1 : 0, position: "relative", zIndex: mode === t.k ? 1 : 0, color: mode === t.k ? C.ink : C.inkMuted }}>
                 {t.icon}
                 <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: mode === t.k ? 500 : 400, color: mode === t.k ? C.ink : C.inkMuted }}>{t.l}</span>
               </button>
             ))}
           </div>
           <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 10 }}>Accent</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
             {[{ k: "red", l: "Crimson", c: "#c41e1e" }, { k: "blue", l: "Cobalt", c: "#1e5fc4" }, { k: "green", l: "Forest", c: "#1e7a3d" }, { k: "purple", l: "Amethyst", c: "#6b21a8" }].map((c) => (
               <button key={c.k} onClick={() => setAccent(c.k)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", border: accent === c.k ? `1.5px solid ${c.c}` : `1px solid ${C.rule}`, backgroundColor: accent === c.k ? C.accentBg : "transparent", cursor: "pointer" }}>
                 <div style={{ width: 18, height: 18, borderRadius: "50%", backgroundColor: c.c, border: accent === c.k ? "2px solid #fff" : "none", boxShadow: accent === c.k ? `0 0 0 1px ${c.c}` : "none" }} />
@@ -866,11 +972,17 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
               </button>
             ))}
           </div>
+          {toast && (
+            <div style={{ marginBottom: 16, padding: "8px 12px", fontFamily: F.sans, fontSize: 11, backgroundColor: toast === "success" ? "#f0faf0" : "#fef5f5", border: `1px solid ${toast === "success" ? "#c3e6c3" : "#f5d5d5"}`, color: toast === "success" ? "#2d6a2d" : "#c41e1e" }}>
+              {toast === "success" ? "✓ Saved." : "Failed to save."}
+            </div>
+          )}
+          <button onClick={saveAppearance} disabled={saving} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "6px 14px", cursor: saving ? "default" : "pointer" }}>{saving ? "Saving…" : "Save"}</button>
         </div>
         <div style={{ height: 1, backgroundColor: C.rule, margin: "0 24px" }} />
 
         <div style={{ padding: "24px" }}>
-          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Filing Sources</div>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Integrations</div>
           {[{ name: "Telegram", on: true, det: "Connected · @deborah_bot" }, { name: "WhatsApp", on: false, det: "Send messages to file stories" }].map((s, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", border: `1px solid ${C.rule}`, marginBottom: 8, backgroundColor: s.on ? C.accentBg : "transparent" }}>
               <div><div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.ink }}>{s.name}</div><div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{s.det}</div></div>
@@ -883,60 +995,212 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
         <div style={{ padding: "24px" }}>
           <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Plan</div>
           <div style={{ border: `1px solid ${C.rule}`, padding: 20 }}>
-            <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink }}>Free <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, border: `1px solid ${C.accent}`, padding: "2px 8px", marginLeft: 8, textTransform: "uppercase" }}>Current</span></div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, marginTop: 4 }}>30 entries/month · Basic editing</div>
-            <div style={{ height: 1, backgroundColor: C.rule, margin: "12px 0" }} />
-            <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink, marginBottom: 6 }}>Premium</div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, lineHeight: 1.6, marginBottom: 16 }}>Unlimited entries · Advanced editing · Compiled editions · PDF export · Public page</div>
-            <button style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: "pointer" }}>Upgrade — $9/mo</button>
+            {(() => {
+              const role = profile?.role || "reader";
+              const label = role.charAt(0).toUpperCase() + role.slice(1);
+              const desc = role === "reader" ? "30 entries/month · Basic editing" : role === "editor" ? "Unlimited entries · Advanced editing · Editions" : role === "publisher" ? "Everything in editor · PDF export · Public page" : "Full platform access";
+              const nextLevel = role === "reader" ? "Editor" : role === "editor" ? "Publisher" : null;
+              const canUpgrade = nextLevel !== null;
+              return (
+                <>
+                  <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink }}>{label}</div>
+                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, marginTop: 4 }}>{desc}</div>
+                  {canUpgrade && (
+                    <button style={{ width: "100%", padding: 10, marginTop: 16, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: "pointer" }}>Upgrade to {nextLevel}</button>
+                  )}
+                  <button style={{ width: "100%", padding: 10, marginTop: 8, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.inkMuted, backgroundColor: "transparent", border: `1px solid ${C.rule}`, cursor: "pointer" }}>Manage plan</button>
+                </>
+              );
+            })()}
           </div>
         </div>
         <div style={{ height: 1, backgroundColor: C.rule, margin: "0 24px" }} />
 
         <div style={{ padding: "24px" }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Security</div>
+          <button onClick={() => { setPwDialogOpen(true); setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwToast(null); }} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, border: `1px solid ${C.rule}`, backgroundColor: "transparent", padding: "10px 20px", cursor: "pointer" }}>Change password</button>
+        </div>
+
+        {pwDialogOpen && (
+          <div onClick={(e) => { if (e.target === e.currentTarget) setPwDialogOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 2100, backgroundColor: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.2s ease" }}>
+            <div style={{ backgroundColor: C.surface, maxWidth: 380, width: "90%", padding: 28, boxShadow: "0 12px 48px rgba(0,0,0,0.15)", border: `1px solid ${C.rule}` }}>
+              <h3 style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, color: C.ink, marginBottom: 16 }}>Change password</h3>
+              <input type="password" value={pwCurrent} onChange={(e) => setPwCurrent(e.target.value)} placeholder="Current password" style={{ width: "100%", padding: "8px 12px", marginBottom: 8, fontFamily: F.sans, fontSize: 13, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none", boxSizing: "border-box" }} />
+              <input type="password" value={pwNew} onChange={(e) => setPwNew(e.target.value)} placeholder="New password (min 8 chars)" style={{ width: "100%", padding: "8px 12px", marginBottom: 8, fontFamily: F.sans, fontSize: 13, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none", boxSizing: "border-box" }} />
+              <input type="password" value={pwConfirm} onChange={(e) => setPwConfirm(e.target.value)} placeholder="Confirm new password" style={{ width: "100%", padding: "8px 12px", marginBottom: 12, fontFamily: F.sans, fontSize: 13, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none", boxSizing: "border-box" }} />
+              {pwToast && (
+                <div style={{ marginBottom: 12, padding: "8px 12px", fontFamily: F.sans, fontSize: 11, backgroundColor: pwToast === "success" ? "#f0faf0" : "#fef5f5", border: `1px solid ${pwToast === "success" ? "#c3e6c3" : "#f5d5d5"}`, color: pwToast === "success" ? "#2d6a2d" : "#c41e1e" }}>
+                  {pwToast === "success" ? "✓ Password updated." : pwToast}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button onClick={() => setPwDialogOpen(false)} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.inkMuted, border: `1px solid ${C.rule}`, backgroundColor: "transparent", padding: "8px 18px", cursor: "pointer" }}>Cancel</button>
+                <button onClick={savePassword} disabled={pwSaving || !pwCurrent || !pwNew || !pwConfirm} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "8px 18px", cursor: pwSaving || !pwCurrent || !pwNew || !pwConfirm ? "default" : "pointer" }}>{pwSaving ? "Updating…" : "Update Password"}</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PROFILE PANEL — Profile + Publication (photo, name, about me, city, pub name, motto)
+// ============================================================
+function ProfilePanel({ isOpen, onClose, C, userId, profile, onSaved, uploadAttachment }) {
+  const [name, setName] = useState(profile?.name || "");
+  const [aboutMe, setAboutMe] = useState(profile?.about_me || "");
+  const [city, setCity] = useState(profile?.city || "");
+  const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || "");
+  const [pubName, setPubName] = useState(profile?.publication_name || "");
+  const [motto, setMotto] = useState(profile?.motto || "");
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (profile) {
+      setName(profile.name || "");
+      setAboutMe(profile.about_me || "");
+      setCity(profile.city || "");
+      setAvatarUrl(profile.avatar_url || "");
+      setPubName(profile.publication_name || "");
+      setMotto(profile.motto || "");
+    }
+  }, [profile]);
+
+  if (!isOpen) return null;
+
+  const handlePhotoSelect = async (e) => {
+    const file = e.target?.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    setPhotoUploading(true);
+    try {
+      const url = await uploadAttachment(userId, file);
+      setAvatarUrl(url);
+    } catch (err) {
+      console.error("Photo upload failed:", err);
+      setToast("error");
+    } finally {
+      setPhotoUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setToast(null);
+    try {
+      await updateProfile(userId, {
+        name: name.trim() || undefined,
+        about_me: aboutMe.trim() || null,
+        city: city.trim() || null,
+        avatar_url: avatarUrl || null,
+        publication_name: pubName.trim() || undefined,
+        motto: motto.trim() || undefined,
+      });
+      setToast("success");
+      onSaved?.();
+      setTimeout(() => {
+        setToast(null);
+        onClose();
+      }, 1200);
+    } catch (err) {
+      console.error("Failed to save profile:", err);
+      setToast("error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, backgroundColor: C.overlay, zIndex: 2000, display: "flex", justifyContent: "flex-end", animation: "fadeIn 0.2s ease" }}>
+      <div style={{ backgroundColor: C.surface, width: 400, height: "100%", overflow: "auto", animation: "slideInRight 0.3s ease", borderLeft: `1px solid ${C.rule}` }}>
+        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.rule}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h2 style={{ fontFamily: F.display, fontSize: 20, fontWeight: 600, color: C.ink }}>My Profile</h2>
+            <p style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, marginTop: 2 }}>Profile and publication</p>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkMuted, fontSize: 18 }}>✕</button>
+        </div>
+
+        <div style={{ padding: "24px" }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Profile</div>
+
+          {/* Photo */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 8 }}>Photo</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoSelect} style={{ display: "none" }} />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoUploading}
+                style={{
+                  width: 72, height: 72, borderRadius: "50%", border: `2px solid ${C.rule}`,
+                  backgroundColor: avatarUrl ? "transparent" : C.sectionBg, overflow: "hidden",
+                  cursor: photoUploading ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                }}
+              >
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <span style={{ fontFamily: F.sans, fontSize: 24, fontWeight: 600, color: C.inkMuted }}>{photoUploading ? "…" : "+"}</span>
+                )}
+              </button>
+              <div>
+                <p style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, marginBottom: 4 }}>{photoUploading ? "Uploading…" : avatarUrl ? "Click to change photo" : "Add a profile photo"}</p>
+                {avatarUrl && (
+                  <button type="button" onClick={() => setAvatarUrl("")} style={{ fontFamily: F.sans, fontSize: 10, color: C.accent, background: "none", border: "none", cursor: "pointer" }}>Remove</button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Name */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Display name</div>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={{ width: "100%", padding: "8px 12px", fontFamily: F.body, fontSize: 14, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {/* About me */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>About me</div>
+            <textarea value={aboutMe} onChange={(e) => setAboutMe(e.target.value)} placeholder="A short bio for your public page…" rows={4} style={{ width: "100%", padding: "8px 12px", fontFamily: F.body, fontSize: 13, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+          </div>
+
+          {/* City */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>City</div>
+            <CityField value={city} onChange={setCity} placeholder="Where do you write from?" style={{ marginBottom: 0 }} inputStyle={{ padding: "8px 12px", fontFamily: F.body, fontSize: 13, backgroundColor: C.sectionBg }} colors={{ ink: C.ink, inkMuted: C.inkMuted, rule: C.rule, bg: C.sectionBg, sectionBg: C.sectionBg }} />
+          </div>
+
+          <div style={{ height: 1, backgroundColor: C.rule, margin: "0 -24px 24px" }} />
           <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Publication</div>
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Name</div>
-            <input value={ln} onChange={(e) => setLn(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontFamily: F.display, fontSize: 14, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Motto</div>
-            <input value={lm} onChange={(e) => setLm(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
+            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Publication name</div>
+            <input value={pubName} onChange={(e) => setPubName(e.target.value)} placeholder="e.g. The Deborah Times" style={{ width: "100%", padding: "8px 12px", fontFamily: F.display, fontSize: 14, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none", boxSizing: "border-box" }} />
           </div>
           <div style={{ marginBottom: 20 }}>
-            <CityField
-              label="City"
-              value={lc}
-              onChange={setLc}
-              placeholder="Where do you write from?"
-              style={{ marginBottom: 0 }}
-              labelStyle={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, textTransform: "none", letterSpacing: "normal" }}
-              inputStyle={{ padding: "8px 12px", fontFamily: F.body, fontSize: 13, backgroundColor: C.sectionBg }}
-              colors={{ ink: C.ink, inkMuted: C.inkMuted, rule: C.rule, bg: C.sectionBg, sectionBg: C.sectionBg }}
-            />
+            <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Motto</div>
+            <input value={motto} onChange={(e) => setMotto(e.target.value)} placeholder="All the life that's fit to print" style={{ width: "100%", padding: "8px 12px", fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none", boxSizing: "border-box" }} />
           </div>
+
           {toast === "success" && (
-            <div style={{
-              padding: "10px 14px", marginBottom: 12,
-              backgroundColor: "#f0faf0", border: "1px solid #c3e6c3",
-              fontFamily: F.sans, fontSize: 12, color: "#2d6a2d",
-              display: "flex", alignItems: "center", gap: 8,
-              animation: "fadeIn 0.2s ease",
-            }}>
-              <span>✓</span> Changes saved successfully.
+            <div style={{ padding: "10px 14px", marginBottom: 12, backgroundColor: "#f0faf0", border: "1px solid #c3e6c3", fontFamily: F.sans, fontSize: 12, color: "#2d6a2d", display: "flex", alignItems: "center", gap: 8, animation: "fadeIn 0.2s ease" }}>
+              <span>✓</span> Profile saved.
             </div>
           )}
           {toast === "error" && (
-            <div style={{
-              padding: "10px 14px", marginBottom: 12,
-              backgroundColor: "#fef5f5", border: "1px solid #f5d5d5",
-              fontFamily: F.sans, fontSize: 12, color: "#c41e1e",
-              animation: "fadeIn 0.2s ease",
-            }}>
+            <div style={{ padding: "10px 14px", marginBottom: 12, backgroundColor: "#fef5f5", border: "1px solid #f5d5d5", fontFamily: F.sans, fontSize: 12, color: "#c41e1e", animation: "fadeIn 0.2s ease" }}>
               Failed to save. Please try again.
             </div>
           )}
-          <button onClick={save} disabled={saving || toast === "success"} style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: saving || toast === "success" ? "default" : "pointer", opacity: saving || toast === "success" ? 0.7 : 1 }}>{saving ? "Saving..." : toast === "success" ? "Saved!" : "Save Changes"}</button>
+          <button onClick={save} disabled={saving || toast === "success"} style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: saving || toast === "success" ? "default" : "pointer", opacity: saving || toast === "success" ? 0.7 : 1 }}>
+            {saving ? "Saving…" : toast === "success" ? "Saved!" : "Save Changes"}
+          </button>
         </div>
       </div>
     </div>
@@ -946,9 +1210,19 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
 // ============================================================
 // PLATFORM HEADER
 // ============================================================
-function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isAdmin }) {
+function PlatformHeader({ user, C, onSettings, onProfile, onEditor, onAdmin, isAdmin, userId, onOpenArticle }) {
   const [menu, setMenu] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
   const menuRef = useRef(null);
+  const notifRef = useRef(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchNotifications(userId, { limit: 20, unreadOnly: false })
+      .then(setNotifications)
+      .catch(() => setNotifications([]));
+  }, [userId, notifOpen]);
 
   useEffect(() => {
     if (!menu) return;
@@ -959,9 +1233,32 @@ function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isAdmin }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [menu]);
 
+  useEffect(() => {
+    if (!notifOpen) return;
+    const handleClickOutside = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [notifOpen]);
+
   const handleSignOut = async () => {
     setMenu(false);
     await supabase.auth.signOut();
+  };
+
+  const unreadCount = notifications.filter((n) => !n.read_at).length;
+
+  const handleNotifClick = async (n) => {
+    if (n.entry_id && onOpenArticle) {
+      try {
+        const entry = await fetchEntryFull(userId, n.entry_id);
+        if (entry) onOpenArticle(entry, [entry], 0);
+      } catch (_) {}
+    }
+    if (!n.read_at) await markNotificationRead(userId, n.id);
+    setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)));
+    setNotifOpen(false);
   };
 
   return (
@@ -969,23 +1266,46 @@ function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isAdmin }) {
       <div style={{ maxWidth: 980, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", height: 48 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink }}>The Hauss</span>
-          <span style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", border: `1px solid ${C.accent}`, padding: "2px 6px" }}>Beta</span>
+          <span style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", border: `1px solid ${C.accent}`, padding: "2px 6px" }}>{userId ? (ROLE_LABELS[user.role] || user.role) : "Beta"}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={onEditor} onMouseEnter={(e) => e.currentTarget.style.opacity = "0.85"} onMouseLeave={(e) => e.currentTarget.style.opacity = "1"} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "6px 16px", cursor: "pointer", transition: "opacity 0.2s" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
             New Entry
           </button>
+          {userId && (
+            <div style={{ position: "relative" }} ref={notifRef}>
+              <button onClick={() => setNotifOpen(!notifOpen)} style={{ background: "none", border: "none", cursor: "pointer", padding: 6, color: C.inkMuted, display: "flex", position: "relative" }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                {unreadCount > 0 && (
+                  <span style={{ position: "absolute", top: 2, right: 2, minWidth: 14, height: 14, borderRadius: 7, backgroundColor: C.accent, color: C.bg, fontFamily: F.sans, fontSize: 9, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{unreadCount > 99 ? "99+" : unreadCount}</span>
+                )}
+              </button>
+              {notifOpen && (
+                <div style={{ position: "absolute", top: 36, right: 0, backgroundColor: C.surface, border: `1px solid ${C.rule}`, boxShadow: "0 8px 30px rgba(0,0,0,0.12)", minWidth: 280, maxWidth: 360, maxHeight: 400, overflow: "auto", zIndex: 999, animation: "fadeIn 0.15s ease" }}>
+                  <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.rule}`, fontFamily: F.sans, fontSize: 11, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1px" }}>Notifications</div>
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: 24, fontFamily: F.body, fontSize: 12, color: C.inkMuted, fontStyle: "italic" }}>No notifications yet</div>
+                  ) : (
+                    notifications.map((n) => (
+                      <button key={n.id} onClick={() => handleNotifClick(n)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", background: n.read_at ? "transparent" : C.sectionBg, border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer", borderBottom: `1px solid ${C.rule}` }}>
+                        <span style={{ color: C.accent }}>✉️</span> Your letter to yourself is ready to open
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {user.role === "reader" && !user.isTester && <button style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, backgroundColor: "transparent", border: `1px solid ${C.accent}`, padding: "5px 12px", cursor: "pointer" }}>Upgrade</button>}
-          <button onClick={onSettings} style={{ background: "none", border: "none", cursor: "pointer", padding: 6, color: C.inkMuted, display: "flex" }}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-          </button>
           <div style={{ position: "relative" }} ref={menuRef}>
-            <button onClick={() => setMenu(!menu)} style={{ width: 30, height: 30, borderRadius: "50%", backgroundColor: C.accent, color: "#fff", border: "none", cursor: "pointer", fontFamily: F.sans, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center" }}>{user.avatar}</button>
+            <button onClick={() => setMenu(!menu)} style={{ width: 30, height: 30, borderRadius: "50%", backgroundColor: user.avatarUrl ? "transparent" : C.accent, color: user.avatarUrl ? "transparent" : "#fff", border: "none", cursor: "pointer", fontFamily: F.sans, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+              {user.avatarUrl ? <img src={user.avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : user.avatar}
+            </button>
             {menu && <div style={{ position: "absolute", top: 38, right: 0, backgroundColor: C.surface, border: `1px solid ${C.rule}`, boxShadow: "0 8px 30px rgba(0,0,0,0.12)", minWidth: 200, zIndex: 999, animation: "fadeIn 0.15s ease" }}>
               <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.rule}` }}><div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.ink }}>{user.name}</div><div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{user.email}</div></div>
-              {["My Publication", "Settings", "Export"].map((item, i) => (
-                <button key={i} onClick={() => { setMenu(false); if (item === "Settings") onSettings(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer" }}>{item}</button>
+              {["My Profile", "Settings"].map((item, i) => (
+                <button key={i} onClick={() => { setMenu(false); if (item === "My Profile") onProfile?.(); if (item === "Settings") onSettings(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer" }}>{item}</button>
               ))}
               {isAdmin && (
                 <button onClick={() => { setMenu(false); if (onAdmin) onAdmin(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.accent, cursor: "pointer", fontWeight: 500 }}>
@@ -1003,23 +1323,131 @@ function PlatformHeader({ user, C, onSettings, onEditor, onAdmin, isAdmin }) {
 }
 
 // ============================================================
-// JOURNAL VIEW — Personal, intimate, day-by-day
+// JOURNAL VIEW — Notebook layout with list + spread views
 // ============================================================
-function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, onOpenArticle }) {
-  const [periodKey, setPeriodKey] = useState("thisWeek");
+const SECTION_KEYS = ["dispatch", "essay", "letter", "review", "photo"];
+
+function formatTime(dateStr) {
+  const d = new Date(dateStr);
+  let h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${m} ${ampm}`;
+}
+
+function Dropdown({ C, trigger, open, onToggle, children, dropRef, width = 280, active = false }) {
+  return (
+    <div ref={dropRef} style={{ position: "relative" }}>
+      <button onClick={onToggle} style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontFamily: F.sans, fontSize: 11,
+        color: active ? C.bg : C.inkMuted,
+        backgroundColor: active ? C.ink : "transparent",
+        border: `1px solid ${open ? C.ink : active ? C.ink : C.rule}`,
+        padding: "4px 12px", cursor: "pointer",
+        transition: "border-color 0.15s, background-color 0.15s, color 0.15s",
+      }}>
+        {trigger}
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke={active ? C.bg : C.inkMuted} strokeWidth="1.5" strokeLinecap="round">
+          <path d={open ? "M2 6.5L5 3.5L8 6.5" : "M2 3.5L5 6.5L8 3.5"} />
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", left: 0,
+          width, backgroundColor: C.surface || C.bg,
+          border: `1px solid ${C.rule}`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+          zIndex: 100, animation: "fadeIn 0.15s ease",
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotebookPage({ C, entry, readTime, onClick }) {
+  const pad = (n) => n.toString().padStart(2, "0");
+  const d = new Date(entry.created_at);
+  const day = d.getDate();
+  const month = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+  const time = formatTime(entry.created_at);
+  const sealed = isEntrySealed(entry);
+  const bodyText = sealed ? "" : stripHtml(entry.body || "").replace(/\n\n/g, " ");
+  const maxChars = 300;
+  const text = sealed
+    ? (entry.letter_open_at ? `This letter is sealed. It will open on ${new Date(entry.letter_open_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. You'll receive a notification when it opens.` : "Sealed")
+    : (bodyText.length > maxChars ? bodyText.slice(0, maxChars) + "…" : bodyText);
+  return (
+    <div
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => e.key === "Enter" && onClick() : undefined}
+      style={{
+        display: "flex", flexDirection: "column", minHeight: "100%",
+        cursor: onClick ? "pointer" : "default",
+        transition: onClick ? "background-color 0.15s" : undefined,
+      }}
+      onMouseEnter={onClick ? (e) => (e.currentTarget.style.backgroundColor = C.sectionBg) : undefined}
+      onMouseLeave={onClick ? (e) => (e.currentTarget.style.backgroundColor = "transparent") : undefined}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 20 }}>
+        <div>
+          <span style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pad(day)}</span>
+          <span style={{ fontFamily: F.display, fontSize: 14, fontWeight: 700, color: C.ink, marginLeft: 8 }}>{month}</span>
+        </div>
+        <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{time}</span>
+      </div>
+      <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 10 }}>
+        {SECTION_UPPER[entry.section] || (entry.section && entry.section.toUpperCase())}
+      </div>
+      {entry.title && (
+        <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.25, color: C.ink, marginBottom: 14 }}>
+          {entry.title}
+        </h3>
+      )}
+      <p style={{ fontFamily: F.body, fontSize: 16, lineHeight: 1.8, color: C.inkLight, marginBottom: 24 }}>{text}</p>
+      <div style={{
+        display: "flex", gap: 8, alignItems: "center",
+        marginTop: "auto", paddingTop: 16, borderTop: `1px solid ${C.rule}`,
+      }}>
+        <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+          {(entry.word_count || 0)} words · {readTime(entry.word_count || 0)} min
+        </span>
+        {entry.source === "telegram" && (
+          <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>· via Telegram</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, onOpenArticle, editorOpen, editingEntry }) {
+  const [periodKey, setPeriodKey] = useState("last30");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [sectionOpen, setSectionOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [journal, setJournal] = useState([]);
   const [fullEntries, setFullEntries] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState("list");
+  const [sectionFilter, setSectionFilter] = useState("all");
+  const [spread, setSpread] = useState(0);
   const pickerRef = useRef(null);
+  const sectionRef = useRef(null);
 
   useEffect(() => {
-    const outside = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
-    if (pickerOpen) document.addEventListener("mousedown", outside);
-    return () => document.removeEventListener("mousedown", outside);
-  }, [pickerOpen]);
+    const handler = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false);
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const getDateRange = useCallback(() => {
     const now = new Date();
@@ -1063,10 +1491,7 @@ function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, on
       fetchJournal({ userId, ...range }),
       fetchEntriesFull({ userId, ...range }),
     ])
-      .then(([journalData, fullData]) => {
-        setJournal(journalData);
-        setFullEntries(fullData);
-      })
+      .then(([, fullData]) => setFullEntries(fullData))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [userId, periodKey, customFrom, customTo, getDateRange, dataVersion]);
@@ -1103,9 +1528,6 @@ function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, on
     }
   };
 
-  const currentJournal = journal;
-  const totalEntries = currentJournal.reduce((a, d) => a + d.entries.length, 0);
-
   const presets = (() => {
     const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1122,195 +1544,278 @@ function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, on
     ];
   })();
 
+  const filteredEntries = sectionFilter === "all"
+    ? fullEntries
+    : fullEntries.filter((e) => e.section === sectionFilter);
+
+  const sectionCounts = SECTION_KEYS.reduce((acc, k) => {
+    acc[k] = fullEntries.filter((e) => e.section === k).length;
+    return acc;
+  }, { all: fullEntries.length });
+  sectionCounts.all = fullEntries.length;
+
+  const totalEntries = filteredEntries.length;
+  const totalWords = filteredEntries.reduce((sum, e) => sum + (e.word_count || 0), 0);
+
+  const sectionsForDropdown = [
+    { key: "all", label: "All Sections", count: sectionCounts.all },
+    ...SECTION_KEYS.map((k) => ({ key: k, label: SECTION_LABELS[k] || k, count: sectionCounts[k] || 0 })),
+  ];
+
+  const titleLabel = periodKey === "custom" && customFrom && customTo
+    ? `${customFrom} – ${customTo}`
+    : (periodTitles[periodKey] || "This Week");
+  const rangeShort = periodKey === "custom" && customFrom && customTo
+    ? `${customFrom} – ${customTo}`
+    : (presets.find((p) => p.key === periodKey)?.sub || titleLabel);
+  const currentSection = sectionsForDropdown.find((s) => s.key === sectionFilter);
+  const sectionLabel = currentSection ? currentSection.label : "All Sections";
+
+  const readTime = (wc) => getReadTime(wc || 0);
+  const pad = (n) => n.toString().padStart(2, "0");
+  const totalSpreads = Math.max(1, Math.ceil(filteredEntries.length / 2));
+  const leftEntry = filteredEntries[spread * 2];
+  const rightEntry = filteredEntries[spread * 2 + 1] || null;
+
+  useEffect(() => {
+    if (viewMode !== "notebook") return;
+    if (editorOpen || editingEntry) return;
+    const handleKey = (e) => {
+      if (!["ArrowLeft","ArrowRight"].includes(e.key)) return;
+      const el = document.activeElement ?? e.target;
+      if (["INPUT", "TEXTAREA"].includes(el?.tagName)) return;
+      if (el?.isContentEditable) return;
+      if (el?.closest?.(".ProseMirror, [contenteditable=true], [data-editor-root]")) return;
+      if (e.key === "ArrowLeft") {
+        setSpread((s) => Math.max(0, s - 1));
+        e.preventDefault();
+      } else if (e.key === "ArrowRight") {
+        setSpread((s) => Math.min(totalSpreads - 1, s + 1));
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", handleKey, true);
+    return () => document.removeEventListener("keydown", handleKey, true);
+  }, [viewMode, totalSpreads, editorOpen, editingEntry]);
+
   return (
-    <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
-      {/* Journal header */}
-      <div style={{ padding: "40px 0 24px", textAlign: "center" }}>
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
+      {/* Header */}
+      <div style={{ padding: "40px 0 8px", textAlign: "center" }}>
         <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Notebook</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink }}>{titleLabel}</h2>
+        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginTop: 6 }}>
+          {loading ? "Loading..." : `${totalEntries} entries · ${totalWords} words`}
+        </p>
+      </div>
 
-        {/* Period selector — title + calendar icon to the right */}
-        <div style={{ position: "relative" }} ref={pickerRef}>
-          <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, margin: 0 }}>
-            {periodTitles[periodKey] || "This Week"}
-          </h2>
-
-          {/* Calendar icon — absolute right */}
-          <button
-            onClick={() => setPickerOpen(!pickerOpen)}
-            style={{
-              position: "absolute", top: "50%", right: 0, transform: "translateY(-50%)",
-              background: "none", border: "none", cursor: "pointer",
-              padding: 6, display: "flex", alignItems: "center", justifyContent: "center",
-              opacity: pickerOpen ? 1 : 0.35, transition: "opacity 0.25s ease",
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
-            onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.opacity = "0.35"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.inkMuted} strokeWidth="1.5" strokeLinecap="round">
-              <rect x="3" y="4" width="18" height="18" rx="2"/>
-              <path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>
-              <circle cx="8" cy="15" r="1" fill={C.inkMuted} stroke="none"/>
-              <circle cx="12" cy="15" r="1" fill={C.inkMuted} stroke="none"/>
-              <circle cx="16" cy="15" r="1" fill={C.inkMuted} stroke="none"/>
+      {/* Controls bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, padding: "12px 0", marginBottom: 32, marginTop: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Dropdown C={C} dropRef={sectionRef} trigger={sectionLabel} open={sectionOpen}
+            onToggle={() => { setSectionOpen(!sectionOpen); setPickerOpen(false); }} width={220}
+            active={sectionFilter !== "all"}>
+            <div style={{ padding: "6px 0" }}>
+              {sectionsForDropdown.map((s) => (
+                <button key={s.key} onClick={() => { setSectionFilter(s.key); setSectionOpen(false); setSpread(0); }} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  width: "100%", padding: "10px 16px",
+                  backgroundColor: "transparent", border: "none", cursor: "pointer",
+                  borderLeft: sectionFilter === s.key ? `3px solid ${C.accent}` : "3px solid transparent",
+                  transition: "background-color 0.1s",
+                }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = C.sectionBg)}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
+                  <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: sectionFilter === s.key ? 600 : 400, color: s.count === 0 ? C.inkFaint : C.ink }}>{s.label}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{s.count}</span>
+                </button>
+              ))}
+            </div>
+          </Dropdown>
+          <Dropdown C={C} dropRef={pickerRef} trigger={<span style={{ fontFamily: F.mono }}>{rangeShort}</span>}
+            open={pickerOpen} onToggle={() => { setPickerOpen(!pickerOpen); setSectionOpen(false); }} width={320}
+            active>
+            <div style={{ padding: "6px 0" }}>
+              {presets.map((p) => (
+                <button key={p.key} onClick={() => { setPeriodKey(p.key); setPickerOpen(false); setSpread(0); }} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  width: "100%", padding: "11px 16px",
+                  backgroundColor: "transparent", border: "none", cursor: "pointer",
+                  borderLeft: periodKey === p.key ? `3px solid ${C.accent}` : "3px solid transparent",
+                  transition: "background-color 0.1s",
+                }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = C.sectionBg)}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
+                  <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: periodKey === p.key ? 600 : 400, color: C.ink }}>{p.label}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>{p.sub}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ height: 1, backgroundColor: C.rule }} />
+            <div style={{ padding: "14px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={C.inkMuted} strokeWidth="1.3">
+                  <rect x="1" y="2" width="10" height="9" rx="1.5"/><line x1="1" y1="5" x2="11" y2="5"/>
+                  <line x1="3.5" y1="0.5" x2="3.5" y2="3"/><line x1="8.5" y1="0.5" x2="8.5" y2="3"/>
+                </svg>
+                <span style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px" }}>Custom Range</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>From</label>
+                  <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} max={customTo || undefined} style={{
+                    width: "100%", padding: "7px 8px", fontFamily: F.sans, fontSize: 11, color: C.ink,
+                    border: `1px solid ${C.rule}`, backgroundColor: C.sectionBg || C.bg, outline: "none",
+                  }} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 3 }}>To</label>
+                  <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} min={customFrom || undefined} style={{
+                    width: "100%", padding: "7px 8px", fontFamily: F.sans, fontSize: 11, color: C.ink,
+                    border: `1px solid ${C.rule}`, backgroundColor: C.sectionBg || C.bg, outline: "none",
+                  }} />
+                </div>
+              </div>
+              <button onClick={() => { applyCustom(); setSpread(0); }} disabled={!customFrom || !customTo} style={{
+                width: "100%", marginTop: 10, padding: "8px 0",
+                fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                color: customFrom && customTo ? C.bg : C.inkFaint,
+                backgroundColor: customFrom && customTo ? C.ink : C.rule,
+                border: "none", cursor: customFrom && customTo ? "pointer" : "default",
+              }}>Apply</button>
+            </div>
+          </Dropdown>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => setViewMode("list")} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "list" ? C.ink : C.rule}`,
+            opacity: viewMode === "list" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <line x1="1" y1="3" x2="15" y2="3"/><line x1="1" y1="8" x2="15" y2="8"/><line x1="1" y1="13" x2="15" y2="13"/>
             </svg>
           </button>
-
-          {/* Period picker dropdown */}
-          {pickerOpen && (
-            <div style={{
-              position: "absolute", top: "calc(100% + 10px)", right: 0,
-              zIndex: 100, backgroundColor: C.surface, border: `1px solid ${C.rule}`,
-              boxShadow: "0 8px 30px rgba(0,0,0,0.1)", minWidth: 280,
-              animation: "fadeIn 0.2s ease", textAlign: "left",
-            }}>
-              {/* Presets */}
-              <div style={{ padding: "6px 0" }}>
-                {presets.map((p) => (
-                  <button key={p.key} onClick={() => { setPeriodKey(p.key); setPickerOpen(false); }}
-                    style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                      width: "100%", padding: "10px 18px", background: "none", border: "none",
-                      cursor: "pointer", transition: "background-color 0.1s",
-                      backgroundColor: periodKey === p.key ? C.sectionBg : "transparent",
-                    }}
-                    onMouseEnter={(e) => { if (periodKey !== p.key) e.currentTarget.style.backgroundColor = C.sectionBg; }}
-                    onMouseLeave={(e) => { if (periodKey !== p.key) e.currentTarget.style.backgroundColor = "transparent"; }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {periodKey === p.key && <div style={{ width: 3, height: 14, backgroundColor: C.accent, flexShrink: 0 }} />}
-                      <span style={{ fontFamily: F.sans, fontSize: 12, fontWeight: periodKey === p.key ? 500 : 400, color: periodKey === p.key ? C.ink : C.inkLight }}>{p.label}</span>
-                    </div>
-                    <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>{p.sub}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Divider */}
-              <div style={{ height: 1, backgroundColor: C.rule }} />
-
-              {/* Custom range */}
-              <div style={{ padding: "14px 18px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.inkMuted} strokeWidth="1.5" strokeLinecap="round">
-                    <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>
-                  </svg>
-                  <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px" }}>Custom Range</span>
-                </div>
-                <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>From</label>
-                    <input type="date" value={customFrom} max={customTo || undefined}
-                      onChange={(e) => setCustomFrom(e.target.value)}
-                      style={{ width: "100%", padding: "7px 8px", fontFamily: F.sans, fontSize: 12, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }}
-                    />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 }}>To</label>
-                    <input type="date" value={customTo} min={customFrom || undefined}
-                      onChange={(e) => setCustomTo(e.target.value)}
-                      style={{ width: "100%", padding: "7px 8px", fontFamily: F.sans, fontSize: 12, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }}
-                    />
-                  </div>
-                </div>
-                <button onClick={applyCustom} disabled={!customFrom || !customTo}
-                  style={{
-                    width: "100%", padding: "8px 0",
-                    fontFamily: F.sans, fontSize: 11, fontWeight: 500,
-                    color: customFrom && customTo ? C.bg : C.inkFaint,
-                    backgroundColor: customFrom && customTo ? C.ink : C.rule,
-                    border: "none", cursor: customFrom && customTo ? "pointer" : "default",
-                    transition: "background-color 0.15s",
-                  }}>Apply</button>
-              </div>
-            </div>
-          )}
+          <button onClick={() => { setViewMode("notebook"); setSpread(0); }} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "notebook" ? C.ink : C.rule}`,
+            opacity: viewMode === "notebook" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <rect x="1" y="2" width="6" height="12"/><rect x="9" y="2" width="6" height="12"/><line x1="8" y1="2" x2="8" y2="14"/>
+            </svg>
+          </button>
         </div>
-
-        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginTop: 4, marginBottom: 4 }}>
-          {periodSubs()}
-        </p>
-        <p style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint, marginBottom: 20 }}>
-          {loading ? "Loading..." : `${currentJournal.length} days · ${totalEntries} ${totalEntries === 1 ? "entry" : "entries"}`}
-        </p>
-        <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "0 auto 0" }} />
       </div>
 
       {loading && <LoadingBlock C={C} text="Loading journal entries..." />}
 
-      {/* Day by day timeline */}
-      {!loading && currentJournal.map((day, di) => (
-        <div key={`${periodKey}-${di}`} style={{ marginBottom: 8 }}>
-          {/* Day header */}
-          <div style={{
-            position: "sticky", top: 48, zIndex: 10,
-            backgroundColor: C.bg, padding: "12px 0",
-            borderBottom: `1px solid ${C.rule}`,
-            display: "flex", justifyContent: "space-between", alignItems: "baseline",
-          }}>
-            <span style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 600, color: C.ink, letterSpacing: "0.3px" }}>{day.date}</span>
-            <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{day.entries.length} {day.entries.length === 1 ? "entry" : "entries"}</span>
-          </div>
-
-          {/* Entries */}
-          {day.entries.map((entry, ei) => (
-            <div key={ei} onClick={() => handleOpenArticle(entry.id)} style={{
-              padding: "24px 0",
-              borderBottom: `1px solid ${C.rule}`,
-              animation: `fadeInUp 0.4s ease ${(di * 0.1) + (ei * 0.05)}s both`,
-              cursor: "pointer",
-            }}>
-              {/* Entry meta row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkMuted }}>{entry.time}</span>
-                <span style={{ color: C.rule }}>·</span>
-                <span style={{ fontSize: 12 }}>{entry.mood}</span>
-                <span style={{ color: C.rule }}>·</span>
-                <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "0.5px" }}>{entry.section}</span>
-                {entry.isPublic && (
-                  <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}>
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg>
-                  </span>
-                )}
-                <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint, fontStyle: "italic", marginLeft: "auto" }}>via {entry.source === "telegram" ? "Telegram" : "App"}</span>
-              </div>
-
-              {/* Entry body */}
-              <div style={{ fontFamily: F.body, fontSize: 16, lineHeight: 1.8, color: C.inkLight, letterSpacing: "0.01em" }}>
-                {entry.text}
-              </div>
-
-              {/* Photo placeholder */}
-              {entry.hasPhoto && (
-                <div style={{
-                  marginTop: 16, backgroundColor: C.sectionBg,
-                  height: 240, display: "flex", alignItems: "center", justifyContent: "center",
-                  border: `1px solid ${C.rule}`,
-                }}>
-                  <div style={{ textAlign: "center" }}>
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={C.inkFaint} strokeWidth="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-                    <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkFaint, marginTop: 6 }}>Golden hour, São Paulo</div>
+      {/* List view */}
+      {!loading && viewMode === "list" && (
+        <div>
+          {filteredEntries.map((entry, i) => {
+            const d = new Date(entry.created_at);
+            const day = d.getDate();
+            const month = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+            const time = formatTime(entry.created_at);
+            const excerpt = isEntrySealed(entry)
+              ? (entry.letter_open_at ? `Sealed until ${new Date(entry.letter_open_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : "Sealed")
+              : stripHtml(entry.body || "");
+            return (
+              <div key={entry.id} onClick={() => handleOpenArticle(entry.id)} style={{
+                display: "grid", gridTemplateColumns: "72px 1fr", gap: 0,
+                padding: "28px 0", borderBottom: `1px solid ${C.rule}`,
+                cursor: "pointer", animation: `fadeInUp 0.4s ease ${i * 0.04}s both`,
+                transition: "background-color 0.15s",
+              }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = C.sectionBg)}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
+                <div style={{ textAlign: "right", paddingRight: 16, borderRight: `2px solid ${C.rule}` }}>
+                  <div style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pad(day)}</div>
+                  <div style={{ fontFamily: F.display, fontSize: 13, fontWeight: 600, color: C.inkMuted, marginTop: 2 }}>{month}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 6 }}>{time}</div>
+                </div>
+                <div style={{ paddingLeft: 20 }}>
+                  <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>
+                    {SECTION_UPPER[entry.section] || (entry.section && entry.section.toUpperCase())}
+                  </div>
+                  {(entry.title || isEntrySealed(entry)) && (
+                    <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.25, color: C.ink, marginBottom: 8 }}>
+                      {isEntrySealed(entry) ? (entry.letter_open_at ? `Sealed until ${new Date(entry.letter_open_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : "Sealed letter") : entry.title}
+                    </h3>
+                  )}
+                  <p style={{
+                    fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight,
+                    marginBottom: 12,
+                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+                  }}>
+                    {excerpt}
+                  </p>
+                  <div style={{ display: "flex", gap: 12, fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+                    <span>{(entry.word_count || 0)} words</span>
+                    {entry.source === "telegram" && <span>via Telegram</span>}
                   </div>
                 </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Notebook spread view */}
+      {!loading && viewMode === "notebook" && (
+        <div style={{ animation: "fadeIn 0.3s ease" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: rightEntry ? "1fr 1px 1fr" : "1fr",
+            gap: 0, alignItems: "stretch",
+          }}>
+            <div style={{ display: "flex", flexDirection: "column", minHeight: 280, padding: "8px 32px 32px 0" }}>
+              {leftEntry ? <NotebookPage C={C} entry={leftEntry} readTime={readTime} onClick={() => handleOpenArticle(leftEntry.id)} /> : (
+                <div style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted, fontStyle: "italic" }}>No entries in this period</div>
               )}
             </div>
-          ))}
+            {rightEntry && <div style={{ backgroundColor: C.rule }} />}
+            {rightEntry && (
+              <div style={{ display: "flex", flexDirection: "column", minHeight: 280, padding: "8px 0 32px 32px" }}>
+                <NotebookPage C={C} entry={rightEntry} readTime={readTime} onClick={() => handleOpenArticle(rightEntry.id)} />
+              </div>
+            )}
+          </div>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            borderTop: `1px solid ${C.rule}`, padding: "16px 0", marginTop: 8,
+          }}>
+            <button onClick={() => setSpread((s) => Math.max(0, s - 1))} style={{
+              fontFamily: F.sans, fontSize: 11, color: spread === 0 ? C.inkFaint : C.inkMuted,
+              backgroundColor: "transparent", border: "none",
+              cursor: spread === 0 ? "default" : "pointer", padding: "4px 0",
+            }}>{spread > 0 ? "← Previous" : ""}</button>
+            <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint }}>
+              {filteredEntries.length === 0 ? "0" : `${spread * 2 + 1}–${Math.min(spread * 2 + 2, filteredEntries.length)} of ${filteredEntries.length}`}
+            </span>
+            <button onClick={() => setSpread((s) => Math.min(totalSpreads - 1, s + 1))} style={{
+              fontFamily: F.sans, fontSize: 11, color: spread >= totalSpreads - 1 ? C.inkFaint : C.inkMuted,
+              backgroundColor: "transparent", border: "none",
+              cursor: spread >= totalSpreads - 1 ? "default" : "pointer", padding: "4px 0",
+            }}>{spread < totalSpreads - 1 ? "Next →" : ""}</button>
+          </div>
         </div>
-      ))}
+      )}
 
-      {/* End of journal */}
-      {!loading && <div style={{ textAlign: "center", padding: "40px 0 60px" }}>
-        <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "0 auto 20px" }} />
-        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>
-          End of {(periodTitles[periodKey] || "this week").toLowerCase()} entries
-        </p>
-        <button onClick={onSwitchToEdition} style={{
-          fontFamily: F.sans, fontSize: 11, fontWeight: 500,
-          color: C.inkMuted, backgroundColor: "transparent",
-          border: `1px solid ${C.rule}`, padding: "8px 20px", cursor: "pointer",
-        }}>
-          View Weekly Edition →
-        </button>
-      </div>}
+      {/* End section */}
+      {!loading && (
+        <div style={{ textAlign: "center", padding: "40px 0 60px" }}>
+          <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "0 auto 20px" }} />
+          <button onClick={onSwitchToEdition} style={{
+            fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+            color: C.inkMuted, backgroundColor: "transparent",
+            border: `1px solid ${C.rule}`, padding: "8px 20px", cursor: "pointer",
+          }}>
+            View Weekly Edition →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3696,18 +4201,22 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
   const readTime = Math.max(1, Math.ceil((entry.word_count || 0) / 230));
   const hasAiEdit = entry.ai_edit?.applied;
   const showAiVersion = hasAiEdit && isProUser;
+  const sealed = isEntrySealed(entry);
 
-  const headline = showAiVersion && entry.ai_edit.headline
+  const headline = sealed ? null : (showAiVersion && entry.ai_edit?.headline
     ? entry.ai_edit.headline
-    : entry.title;
-  const subhead = showAiVersion && entry.ai_edit.subhead
-    ? entry.ai_edit.subhead
-    : null;
-  const bodyText = showAiVersion
-    ? entry.ai_edit.edited_body
-    : entry.body;
+    : entry.title);
+  const subhead = sealed ? null : (entry.subhead || (showAiVersion && entry.ai_edit?.subhead) || null);
+  const bodyText = sealed ? "" : (showAiVersion
+    ? entry.ai_edit?.edited_body ?? ""
+    : entry.body ?? "");
 
   const useDropCapFlag = showAiVersion && entry.ai_edit?.mode === "rewrite";
+  const openDateStr = entry.letter_open_at ? (() => {
+    const d = new Date(entry.letter_open_at);
+    const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  })() : "";
 
   const photo = (entry.attachments || []).find((a) => a.type === "photo");
 
@@ -3756,19 +4265,6 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
           {edCtx ? `Vol. ${edCtx.volume} · No. ${edCtx.number || edCtx.num}` : "Notebook"}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {userId && entry.user_id === userId && onStartEdit && (
-            <button
-              onClick={() => onStartEdit(entry)}
-              style={{
-                display: "flex", alignItems: "center", gap: 4, background: "none",
-                border: `1px solid ${C.rule}`, padding: "4px 10px", cursor: "pointer",
-                fontFamily: F.sans, fontSize: 10, color: C.inkMuted,
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              Edit
-            </button>
-          )}
           {entry.is_public && (
             <button onClick={() => {
               const url = `${window.location.origin}/entry/${entry.id}`;
@@ -3796,15 +4292,41 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
             </button>
           )}
           {entry.is_public ? (
-            <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{
+              fontFamily: F.sans, fontSize: 11, fontWeight: 600, color: C.accent,
+              display: "flex", alignItems: "center", gap: 5,
+              backgroundColor: C.accentBg, border: `1px solid ${C.accent}`,
+              padding: "5px 12px",
+            }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg>
               Public
             </span>
           ) : (
-            <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{
+              fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.inkMuted,
+              display: "flex", alignItems: "center", gap: 5,
+              backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`,
+              padding: "5px 12px",
+            }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
               Private
             </span>
+          )}
+          {userId && entry.user_id === userId && onStartEdit && (
+            <button
+              onClick={() => onStartEdit(entry)}
+              style={{
+                display: "flex", alignItems: "center", gap: 5, background: C.accentBg,
+                border: `1px solid ${C.accent}`, padding: "5px 12px", cursor: "pointer",
+                fontFamily: F.sans, fontSize: 11, fontWeight: 600, color: C.accent,
+                transition: "opacity 0.2s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.9"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Edit
+            </button>
           )}
         </div>
       </div>
@@ -3857,8 +4379,23 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
             ))}
           </div>
 
+          {/* Sealed letter placeholder */}
+          {sealed && (
+            <div style={{
+              padding: "48px 0", textAlign: "center",
+              backgroundColor: C.sectionBg, border: `2px dashed ${C.rule}`,
+              marginBottom: 32,
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>✉️</div>
+              <p style={{ fontFamily: F.display, fontSize: 20, fontWeight: 600, color: C.ink, marginBottom: 8 }}>This letter is sealed</p>
+              <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>
+                It will open on {openDateStr}. You&apos;ll receive an email and in-app notification when it&apos;s ready.
+              </p>
+            </div>
+          )}
+
           {/* Photo */}
-          {photo && (
+          {!sealed && photo && (
             <div style={{ marginBottom: 32 }}>
               <div style={{
                 width: "100%", height: 400, backgroundColor: C.sectionBg,
@@ -3886,9 +4423,11 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
           )}
 
           {/* Body text */}
-          <div style={{ animation: "fadeIn 0.3s ease" }}>
-            <RichTextContent text={bodyText} C={C} useDropCap={useDropCapFlag} />
-          </div>
+          {!sealed && (
+            <div style={{ animation: "fadeIn 0.3s ease" }}>
+              <RichTextContent text={bodyText} C={C} useDropCap={useDropCapFlag} />
+            </div>
+          )}
 
           {/* ARTICLE FOOTER */}
           <div style={{ height: 1, backgroundColor: C.rule, margin: "40px 0 32px" }} />
@@ -3951,7 +4490,11 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
                       fontFamily: F.display, fontSize: 16, fontWeight: 600,
                       lineHeight: 1.3, color: C.ink, marginBottom: 4,
                     }}>
-                      {sib.title || (sib.body ? sib.body.slice(0, 60) + "..." : "Untitled")}
+                      {(() => {
+                        if (isEntrySealed(sib)) return sib.letter_open_at ? `Sealed until ${new Date(sib.letter_open_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : "Sealed letter";
+                        const plain = stripHtml(sib.body || "");
+                        return sib.title || (plain ? plain.slice(0, 60) + (plain.length > 60 ? "..." : "") : "Untitled");
+                      })()}
                     </h4>
                     <span style={{
                       fontFamily: F.sans, fontSize: 10, color: C.inkFaint,
@@ -4077,7 +4620,7 @@ function PublicEntryView() {
   const readTime = Math.max(1, Math.ceil((entry.word_count || 0) / 230));
   const hasAiEdit = entry.ai_edit?.applied;
   const headline = hasAiEdit && entry.ai_edit.headline ? entry.ai_edit.headline : entry.title;
-  const subhead = hasAiEdit && entry.ai_edit.subhead ? entry.ai_edit.subhead : null;
+  const subhead = entry.subhead || (hasAiEdit && entry.ai_edit.subhead) || null;
   const bodyText = hasAiEdit ? entry.ai_edit.edited_body : entry.body;
   const useDropCapPublic = hasAiEdit && entry.ai_edit?.mode === "rewrite";
   const photo = (entry.attachments || []).find((a) => a.type === "photo");
@@ -4453,7 +4996,7 @@ function PublicEditionView() {
         )}
 
         {/* Stats bar */}
-        <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, marginBottom: 24 }}>
           {[
             { n: editionData.stats?.totalEntries?.toLocaleString() || "0", l: "Total Entries" },
             { n: editionData.stats?.thisEdition || "0", l: "This Edition" },
@@ -4495,6 +5038,7 @@ export default function App() {
   const [accent, setAccent] = useState("red");
   const [editorOpen, setEditorOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [articleEntry, setArticleEntry] = useState(null);
   const [articleList, setArticleList] = useState([]);
@@ -4578,6 +5122,7 @@ export default function App() {
     role: profile?.role || "reader",
     isTester: profile?.is_tester || false,
     avatar: (profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "U")[0].toUpperCase(),
+    avatarUrl: profile?.avatar_url || null,
   };
 
   const canShareFullEdition = hasAccess(user.role, user.isTester, "editor");
@@ -4722,7 +5267,7 @@ export default function App() {
         ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: ${C.rule}; border-radius: 3px; }
       `}</style>
 
-      <PlatformHeader user={user} C={C} onSettings={() => setSettingsOpen(true)} onEditor={() => setEditorOpen(true)} onAdmin={() => setAdminOpen(true)} isAdmin={user.role === "admin"} />
+      <PlatformHeader user={user} C={C} userId={userId} onSettings={() => setSettingsOpen(true)} onProfile={() => setProfileOpen(true)} onEditor={() => setEditorOpen(true)} onAdmin={() => setAdminOpen(true)} isAdmin={user.role === "admin"} onOpenArticle={openArticle} />
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 24px" }}>
 
@@ -4753,7 +5298,7 @@ export default function App() {
 
         {/* CONDITIONAL VIEW */}
         {view === "journal" ? (
-          <JournalView C={C} userId={userId} onSwitchToEdition={() => setView("edition")} onNewEntry={() => setEditorOpen(true)} dataVersion={dataVersion} onOpenArticle={openArticle} />
+          <JournalView C={C} userId={userId} onSwitchToEdition={() => setView("edition")} onNewEntry={() => setEditorOpen(true)} dataVersion={dataVersion} onOpenArticle={openArticle} editorOpen={editorOpen} editingEntry={editingEntry} />
         ) : view === "archives" ? (
           <ArchivesView
             C={C}
@@ -4936,7 +5481,7 @@ export default function App() {
           </div>
         </div>}
 
-        <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, marginBottom: 24 }}>
           {[{ n: editionData.stats.totalEntries.toLocaleString(), l: "Total Entries" }, { n: editionData.stats.thisEdition, l: "This Edition" }, { n: editionData.stats.editions, l: "Editions" }, { n: editionData.stats.wordsThisWeek.toLocaleString(), l: "Words This Week" }].map((s, i, a) => (
             <div key={i} style={{ display: "flex", alignItems: "center" }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 32px" }}>
@@ -4964,7 +5509,7 @@ export default function App() {
         </footer>
       </div>
 
-      {editorOpen && <EditorView onClose={() => setEditorOpen(false)} onPublished={handleRefresh} C={C} userId={userId} session={session} />}
+      {editorOpen && <EditorView onClose={() => { setEditorOpen(false); setView("journal"); }} onPublished={handleRefresh} C={C} userId={userId} session={session} />}
       {editingEntry && (
         <EditorView
           initialEntry={editingEntry}
@@ -4980,7 +5525,8 @@ export default function App() {
           session={session}
         />
       )}
-      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} pubName={pubName} setPubName={setPubName} motto={motto} setMotto={setMotto} city={city} setCity={setCity} userId={userId} />
+      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} userId={userId} profile={profile} session={session} />
+      <ProfilePanel isOpen={profileOpen} onClose={() => setProfileOpen(false)} C={C} userId={userId} profile={profile} onSaved={() => fetchProfile(userId).then((p) => { setProfile(p); if (p?.city !== undefined) setCity(p.city || ""); if (p?.publication_name) setPubName(p.publication_name); if (p?.motto) setMotto(p.motto); })} uploadAttachment={uploadAttachment} />
       {adminOpen && <AdminPage C={C} onClose={() => setAdminOpen(false)} session={session} />}
       {articleEntry && !editingEntry && (
         <ArticleView

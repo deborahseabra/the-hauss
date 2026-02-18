@@ -20,7 +20,7 @@ import { encrypt, decrypt, decryptOptional } from "./crypto";
 const MOOD_EMOJI = { 0: "☀️", 1: "🌤", 2: "🌧", 3: "⚡", 4: "🌙" };
 const MOOD_LABELS = { 0: "Bright", 1: "Calm", 2: "Heavy", 3: "Electric", 4: "Reflective" };
 
-const SECTION_LABELS = {
+export const SECTION_LABELS = {
   dispatch: "Dispatches",
   essay: "Personal Essays",
   letter: "Letters to Self",
@@ -51,7 +51,7 @@ export const SOURCE_LABELS = {
   api: "API",
 };
 
-const SECTION_UPPER = {
+export const SECTION_UPPER = {
   dispatch: "DISPATCH",
   essay: "PERSONAL ESSAY",
   letter: "LETTER TO SELF",
@@ -113,12 +113,21 @@ function estimateReadTime(wc) {
   return `${mins} min read`;
 }
 
+function isLetterSealed(row) {
+  return row.section === "letter" && row.letter_open_at && new Date(row.letter_open_at) > new Date();
+}
+
 async function decryptEntry(row) {
-  const [title, body] = await Promise.all([
+  if (isLetterSealed(row)) {
+    const { title_encrypted, body_encrypted, subhead_encrypted, ...rest } = row;
+    return { ...rest, title: null, body: "", subhead: null, sealed: true };
+  }
+  const [title, body, subhead] = await Promise.all([
     decryptOptional(row.title_encrypted),
     decrypt(row.body_encrypted),
+    decryptOptional(row.subhead_encrypted),
   ]);
-  return { ...row, title, body };
+  return { ...row, title, body, subhead: subhead || null };
 }
 
 async function decryptAiEdit(ae) {
@@ -145,13 +154,17 @@ async function decryptAiEdit(ae) {
 
 async function decryptEntryFull(row) {
   const entry = await decryptEntry(row);
-  const ai_edit = await decryptAiEdit(row.ai_edits || row.ai_edit);
+  const ai_edit = entry.sealed ? null : await decryptAiEdit(row.ai_edits || row.ai_edit);
   const attachments = row.attachments || [];
   return { ...entry, ai_edit, attachments };
 }
 
 export function getReadTime(wordCount) {
   return Math.max(1, Math.ceil((wordCount || 0) / 230));
+}
+
+export function isEntrySealed(entry) {
+  return !!(entry?.section === "letter" && entry?.letter_open_at && new Date(entry.letter_open_at) > new Date());
 }
 
 // ---------------------------------------------------------------------------
@@ -199,8 +212,8 @@ export async function fetchEntriesFull({ userId, from, to, section, limit: lim }
   let query = supabase
     .from("entries")
     .select(`
-      id, user_id, section, title_encrypted, body_encrypted, mood, is_public,
-      source, word_count, created_at, updated_at,
+      id, user_id, section, title_encrypted, subhead_encrypted, body_encrypted, mood, is_public,
+      source, word_count, created_at, updated_at, letter_open_at,
       ai_edits(mode, tone, headline_encrypted, subhead_encrypted,
         result_encrypted, original_encrypted, changes_count, applied),
       attachments(type, url, metadata)
@@ -228,8 +241,8 @@ export async function fetchEditionEntriesFull(editionId) {
     .select(`
       display_order, is_featured,
       entry:entries(
-        id, user_id, section, title_encrypted, body_encrypted, mood, is_public,
-        source, word_count, created_at, updated_at,
+        id, user_id, section, title_encrypted, subhead_encrypted, body_encrypted, mood, is_public,
+        source, word_count, created_at, updated_at, letter_open_at,
         ai_edits(mode, tone, headline_encrypted, subhead_encrypted,
           result_encrypted, original_encrypted, changes_count, applied),
         attachments(type, url, metadata)
@@ -275,8 +288,8 @@ export async function fetchPublicEntry(entryId) {
   const { data, error } = await supabase
     .from("entries")
     .select(`
-      id, user_id, section, title_encrypted, body_encrypted, mood, is_public,
-      source, word_count, created_at, updated_at,
+      id, user_id, section, title_encrypted, subhead_encrypted, body_encrypted, mood, is_public,
+      source, word_count, created_at, updated_at, letter_open_at,
       ai_edits(mode, tone, headline_encrypted, subhead_encrypted,
         result_encrypted, original_encrypted, changes_count, applied),
       attachments(type, url, metadata)
@@ -323,6 +336,8 @@ export async function fetchJournal({ userId, from, to }) {
       source: entry.source,
       hasPhoto: false,
       wordCount: entry.word_count,
+      letter_open_at: entry.letter_open_at,
+      sealed: entry.sealed,
     });
   }
 
@@ -1084,23 +1099,26 @@ export async function fetchAllReflections(userId) {
  * Creates a new journal entry with encrypted title/body.
  * Returns the created entry (decrypted) or throws on error.
  */
-export async function createEntry({ userId, title, body, section, mood, isPublic, source }) {
+export async function createEntry({ userId, title, subhead, body, section, mood, isPublic, source, letterOpenAt }) {
   const wordCount = body.trim().split(/\s+/).filter(Boolean).length;
 
-  const [titleHex, bodyHex] = await Promise.all([
+  const [titleHex, subheadHex, bodyHex] = await Promise.all([
     title ? encrypt(title) : Promise.resolve(null),
+    subhead ? encrypt(subhead) : Promise.resolve(null),
     encrypt(body),
   ]);
 
   const row = {
     user_id: userId,
     title_encrypted: titleHex,
+    subhead_encrypted: subheadHex,
     body_encrypted: bodyHex,
     section: section || "dispatch",
     mood: mood ?? null,
     is_public: isPublic || false,
     source: source || "app",
     word_count: wordCount,
+    letter_open_at: letterOpenAt ? new Date(letterOpenAt).toISOString() : null,
   };
 
   const { data, error } = await supabase
@@ -1118,21 +1136,24 @@ export async function createEntry({ userId, title, body, section, mood, isPublic
  * Updates an existing entry. Encrypts title/body, updates word_count.
  * The updated_at column is auto-updated by DB trigger.
  */
-export async function updateEntry({ entryId, userId, title, body, section, mood, isPublic }) {
+export async function updateEntry({ entryId, userId, title, subhead, body, section, mood, isPublic, letterOpenAt }) {
   const plainBody = stripHtmlTags(body || "");
   const wordCount = plainBody.split(/\s+/).filter(Boolean).length;
 
-  const [titleHex, bodyHex] = await Promise.all([
+  const [titleHex, subheadHex, bodyHex] = await Promise.all([
     title != null ? (title.trim() ? encrypt(title.trim()) : Promise.resolve(null)) : undefined,
+    subhead != null ? (subhead.trim() ? encrypt(subhead.trim()) : Promise.resolve(null)) : undefined,
     body != null ? encrypt(body) : undefined,
   ]);
 
   const updates = { word_count: wordCount };
   if (titleHex !== undefined) updates.title_encrypted = titleHex;
+  if (subheadHex !== undefined) updates.subhead_encrypted = subheadHex;
   if (bodyHex !== undefined) updates.body_encrypted = bodyHex;
   if (section !== undefined) updates.section = section;
   if (mood !== undefined) updates.mood = mood;
   if (isPublic !== undefined) updates.is_public = isPublic;
+  if (letterOpenAt !== undefined) updates.letter_open_at = letterOpenAt ? new Date(letterOpenAt).toISOString() : null;
 
   const { data, error } = await supabase
     .from("entries")
@@ -1153,8 +1174,8 @@ export async function fetchEntryFull(userId, entryId) {
   const { data, error } = await supabase
     .from("entries")
     .select(`
-      id, user_id, section, title_encrypted, body_encrypted, mood, is_public,
-      source, word_count, created_at, updated_at,
+      id, user_id, section, title_encrypted, subhead_encrypted, body_encrypted, mood, is_public,
+      source, word_count, created_at, updated_at, letter_open_at,
       ai_edits(mode, tone, headline_encrypted, subhead_encrypted,
         result_encrypted, original_encrypted, changes_count, applied),
       attachments(type, url, metadata)
@@ -1172,11 +1193,11 @@ export async function fetchEntryFull(userId, entryId) {
 // ---------------------------------------------------------------------------
 
 /**
- * Updates profile fields (publication_name, motto, theme_mode, theme_accent).
+ * Updates profile fields (name, avatar_url, about_me, publication_name, motto, theme_mode, theme_accent, city).
  * Only sends fields that are provided (non-undefined).
  */
 export async function updateProfile(userId, fields) {
-  const allowed = ["publication_name", "motto", "theme_mode", "theme_accent", "city"];
+  const allowed = ["name", "avatar_url", "about_me", "publication_name", "motto", "theme_mode", "theme_accent", "city"];
   const updates = {};
   for (const key of allowed) {
     if (fields[key] !== undefined) updates[key] = fields[key];
@@ -1266,6 +1287,41 @@ export async function createAttachments(entryId, userId, attachments) {
 
   if (error) throw error;
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+export async function fetchNotifications(userId, { limit = 50, unreadOnly = false } = {}) {
+  let query = supabase
+    .from("notifications")
+    .select("id, type, entry_id, read_at, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (unreadOnly) query = query.is("read_at", null);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function markNotificationRead(userId, notificationId) {
+  const { error } = await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("id", notificationId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function markAllNotificationsRead(userId) {
+  const { error } = await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .is("read_at", null);
+  if (error) throw error;
 }
 
 // ---------------------------------------------------------------------------

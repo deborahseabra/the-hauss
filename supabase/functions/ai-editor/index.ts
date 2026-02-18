@@ -64,6 +64,8 @@ Deno.serve(async (req: Request) => {
       promptId = "proofread";
     } else if (mode === "rewrite" && tone) {
       promptId = `rewrite_${tone}`;
+    } else if (mode === "headline") {
+      promptId = "headline";
     } else {
       return new Response(
         JSON.stringify({ error: "Invalid mode/tone combination" }),

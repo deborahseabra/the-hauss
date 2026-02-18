@@ -220,6 +220,8 @@ The app supports runtime theming via React state:
 
 All theme values are computed dynamically via `getTheme(mode, accent)`.
 
+For production (Supabase), cron jobs that call Edge Functions require a shared **CRON_SECRET**. The repo does not contain the real secret. See **[docs/CRON_SECRET_SETUP.md](docs/CRON_SECRET_SETUP.md)** for one-time setup and rotation.
+
 ---
 
 ## Roadmap

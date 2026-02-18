@@ -3,11 +3,9 @@
 -- ============================================================
 -- Schedule: 0 11 * * 0 = Sunday at 11:00 UTC = 08:00 BRT
 --
--- The CRON_SECRET below must match the Edge Function secret
--- with the same name. Set it via:
---   Supabase Dashboard > Edge Functions > Secrets > Add CRON_SECRET
---
--- Value: REPLACE_CRON_SECRET_AFTER_DEPLOY
+-- CRON_SECRET must match the Edge Function secret. Do NOT put the real secret here.
+-- After deploy: set CRON_SECRET in Dashboard > Edge Functions > Secrets, then run
+-- the one-time SQL from docs/CRON_SECRET_SETUP.md to schedule the job with your secret.
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net;

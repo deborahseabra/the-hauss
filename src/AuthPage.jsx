@@ -31,7 +31,6 @@ export default function AuthPage({ onAuth }) {
   const handleSignup = async (e) => {
     e.preventDefault();
     setError(null);
-    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
     if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     setLoading(true);
     const { error } = await supabase.auth.signUp({
@@ -138,7 +137,7 @@ export default function AuthPage({ onAuth }) {
             <Field label="Name" type="text" value={name} onChange={setName} placeholder="How should we call you?" autoFocus />
             <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="your@email.com" />
             <CityField label="City" value={city} onChange={setCity} placeholder="Where do you write from?" />
-            <PasswordField label="Password" value={password} onChange={setPassword} placeholder="At least 6 characters" />
+            <PasswordField label="Password" value={password} onChange={setPassword} placeholder="Min 8 chars (letters + numbers)" />
             <PasswordField label="Confirm Password" value={confirmPassword} onChange={setConfirmPassword} placeholder="Repeat your password" match={password} />
             <button type="submit" disabled={loading || !email || !password || !confirmPassword} style={btnPrimary(loading || !email || !password || !confirmPassword)}>
               {loading ? "Creating account..." : "Create Account"}
