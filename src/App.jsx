@@ -12,6 +12,8 @@ import {
   fetchAllReflections,
   fetchReflection,
   createEntry,
+  updateEntry,
+  fetchEntryFull,
   updateProfile,
   fetchEntriesFull,
   fetchEditionEntriesFull,
@@ -25,12 +27,15 @@ import {
   fetchPublicEdition,
   updateEditionSharing,
   fetchUserEntriesForBuilder,
+  fetchPhotoAttachmentsForEntries,
   createCustomEdition,
   fetchEditionLinks,
   fetchCityWeather,
 } from "./lib/api";
 import { hasAccess, ROLE_LABELS, ROLE_BADGE_STYLES } from "./lib/access";
 import CityField from "./components/CityField";
+import RichTextEditor from "./components/RichTextEditor";
+import RichTextContent, { stripHtml } from "./components/RichTextContent";
 
 const PALETTES = {
   red: { primary: "#c41e1e", light: "#e85d5d", bg: "#fef5f5", bgDark: "#2a1818" },
@@ -308,9 +313,7 @@ function AiEditor({ text, C, onApply, session }) {
               )}
 
               {/* Body text */}
-              {result.body.split("\n\n").map((p, i) => (
-                <p key={i} style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.7, color: C.inkLight, marginBottom: 10 }}>{p}</p>
-              ))}
+              <RichTextContent text={result.body} C={C} fontSize={14} />
 
               {result.mode === "rewrite" && (
                 <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint, fontStyle: "italic", marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.rule}` }}>
@@ -458,25 +461,36 @@ function LinkForm({ C, onAdd, onCancel }) {
   );
 }
 
-function EditorView({ onClose, onPublished, C, userId, session }) {
-  const [text, setText] = useState("");
-  const [title, setTitle] = useState("");
-  const [section, setSection] = useState("dispatch");
-  const [mood, setMood] = useState(null);
-  const [isPublic, setIsPublic] = useState(false);
+function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) {
+  const isEdit = Boolean(initialEntry);
+  const [text, setText] = useState(isEdit ? (initialEntry.body || "") : "");
+  const [title, setTitle] = useState(isEdit ? (initialEntry.title || "") : "");
+  const [section, setSection] = useState(isEdit ? (initialEntry.section || "dispatch") : "dispatch");
+  const [mood, setMood] = useState(isEdit ? initialEntry.mood ?? null : null);
+  const [isPublic, setIsPublic] = useState(isEdit ? (initialEntry.is_public || false) : false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [aiKey, setAiKey] = useState(0);
   const [pendingAttachments, setPendingAttachments] = useState([]);
-  const [attachPanel, setAttachPanel] = useState(null); // null | 'photo' | 'location' | 'link'
+  const [attachPanel, setAttachPanel] = useState(null); // null | 'location' | 'link'
   const [photoUploading, setPhotoUploading] = useState(false);
-  const ref = useRef(null);
+  const editorRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  useEffect(() => { if (ref.current) setTimeout(() => ref.current.focus(), 200); }, []);
-  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const plainText = editorRef.current ? editorRef.current.getText() : text.replace(/<[^>]*>/g, "");
+  const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
+
+  const handleEditorChange = useCallback((html) => {
+    setText(html);
+  }, []);
+  handleEditorChange._setEditor = (ed) => { editorRef.current = ed; };
+
+  const handleUploadImage = useCallback(async (file) => {
+    const url = await uploadAttachment(userId, file);
+    return url;
+  }, [userId]);
 
   const handlePhotoSelect = async (e) => {
     const file = e.target.files?.[0];
@@ -522,14 +536,15 @@ function EditorView({ onClose, onPublished, C, userId, session }) {
   };
 
   const handleApplyAi = (result) => {
+    const toHtml = (t) => t.split("\n\n").filter(Boolean).map((p) => `<p>${p}</p>`).join("");
     if (result.mode === "rewrite") {
       if (result.headline) setTitle(result.headline);
-      setText(result.body);
+      setText(toHtml(result.body));
       if (result.tone === "intimate") setSection("essay");
       if (result.tone === "literary") setSection("essay");
       if (result.tone === "journalistic") setSection("dispatch");
     } else {
-      setText(result.body);
+      setText(toHtml(result.body));
     }
     setAiKey(k => k + 1);
   };
@@ -539,22 +554,40 @@ function EditorView({ onClose, onPublished, C, userId, session }) {
     setIsSaving(true);
     setSaveError(null);
     try {
-      const entry = await createEntry({
-        userId,
-        title: title.trim() || null,
-        body: text,
-        section,
-        mood,
-        isPublic,
-        source: "app",
-      });
-      if (pendingAttachments.length > 0) {
-        await createAttachments(entry.id, userId, pendingAttachments);
+      if (isEdit) {
+        await updateEntry({
+          entryId: initialEntry.id,
+          userId,
+          title: title.trim() || null,
+          body: text,
+          section,
+          mood,
+          isPublic,
+        });
+        if (pendingAttachments.length > 0) {
+          await createAttachments(initialEntry.id, userId, pendingAttachments);
+        }
+        const updated = await fetchEntryFull(userId, initialEntry.id);
+        setShowSuccess(true);
+        if (onPublished) onPublished(updated);
+      } else {
+        const entry = await createEntry({
+          userId,
+          title: title.trim() || null,
+          body: text,
+          section,
+          mood,
+          isPublic,
+          source: "app",
+        });
+        if (pendingAttachments.length > 0) {
+          await createAttachments(entry.id, userId, pendingAttachments);
+        }
+        setShowSuccess(true);
+        if (onPublished) onPublished();
       }
-      setShowSuccess(true);
-      if (onPublished) onPublished();
     } catch (err) {
-      console.error("Failed to publish entry:", err);
+      console.error("Failed to save entry:", err);
       setSaveError("Failed to save. Please try again.");
     } finally {
       setIsSaving(false);
@@ -572,13 +605,13 @@ function EditorView({ onClose, onPublished, C, userId, session }) {
   if (showSuccess) return (
     <div style={{ position: "fixed", inset: 0, zIndex: 2000, backgroundColor: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.4s ease" }}>
       <div style={{ fontSize: 40, marginBottom: 20, color: C.accent }}>✦</div>
-      <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 8 }}>Published</h2>
-      <p style={{ fontFamily: F.body, fontSize: 16, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>Your entry will appear in this week's edition.</p>
-      {isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.accent, marginBottom: 24 }}>🌐 Visible at thehauss.me/deborah</p>}
-      {!isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint, marginBottom: 24 }}>🔒 Private — only you can see this</p>}
+      <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{isEdit ? "Saved" : "Published"}</h2>
+      <p style={{ fontFamily: F.body, fontSize: 16, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>{isEdit ? "Your changes have been saved." : "Your entry will appear in this week's edition."}</p>
+      {!isEdit && isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.accent, marginBottom: 24 }}>🌐 Visible at thehauss.me/deborah</p>}
+      {!isEdit && !isPublic && <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint, marginBottom: 24 }}>🔒 Private — only you can see this</p>}
       <div style={{ display: "flex", gap: 12 }}>
-        <button onClick={() => { setShowSuccess(false); setText(""); setTitle(""); setMood(null); setAiKey(k => k + 1); }} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.inkMuted, border: `1px solid ${C.rule}`, backgroundColor: "transparent", padding: "10px 24px", cursor: "pointer" }}>Write Another</button>
-        <button onClick={onClose} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "10px 24px", cursor: "pointer" }}>Back to Edition</button>
+        {!isEdit && <button onClick={() => { setShowSuccess(false); setText(""); setTitle(""); setMood(null); setAiKey(k => k + 1); }} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.inkMuted, border: `1px solid ${C.rule}`, backgroundColor: "transparent", padding: "10px 24px", cursor: "pointer" }}>Write Another</button>}
+        <button onClick={onClose} style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "10px 24px", cursor: "pointer" }}>{isEdit ? "Back" : "Back to Edition"}</button>
       </div>
     </div>
   );
@@ -593,7 +626,7 @@ function EditorView({ onClose, onPublished, C, userId, session }) {
             Back
           </button>
           <div style={{ width: 1, height: 20, backgroundColor: C.rule }} />
-          <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>NEW ENTRY</span>
+          <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{isEdit ? "EDIT ENTRY" : "NEW ENTRY"}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {saveError && <span style={{ fontFamily: F.sans, fontSize: 11, color: "#c41e1e" }}>{saveError}</span>}
@@ -615,7 +648,7 @@ function EditorView({ onClose, onPublished, C, userId, session }) {
             color: text.trim() ? C.bg : C.inkFaint,
             backgroundColor: text.trim() ? C.ink : C.rule,
             border: "none", padding: "8px 24px", cursor: text.trim() ? "pointer" : "default",
-          }}>{isSaving ? "Publishing..." : "Publish"}</button>
+          }}>{isSaving ? (isEdit ? "Saving..." : "Publishing...") : (isEdit ? "Save" : "Publish")}</button>
         </div>
       </div>
 
@@ -635,18 +668,20 @@ function EditorView({ onClose, onPublished, C, userId, session }) {
                 color: C.ink, backgroundColor: "transparent", lineHeight: 1.2, marginBottom: 8, padding: 0,
               }} />
               <div style={{ height: 2, backgroundColor: C.ink, width: 60, marginBottom: 28 }} />
-              <textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)}
-                placeholder="Write freely. What happened? What are you thinking about?
-
-Your AI editor can proofread this or transform it into a polished editorial piece."
-                style={{ width: "100%", minHeight: 300, border: "none", outline: "none", resize: "none", fontFamily: F.body, fontSize: 18, lineHeight: 1.85, color: C.ink, backgroundColor: "transparent", padding: 0 }} />
+              <RichTextEditor
+                value={text}
+                onChange={handleEditorChange}
+                placeholder="Write freely. What happened? What are you thinking about?"
+                C={C}
+                onUploadImage={handleUploadImage}
+              />
             </div>
           </div>
 
           {/* FIXED AI EDITOR BAR at bottom — always visible */}
           <div style={{ flexShrink: 0, borderTop: `1px solid ${C.rule}`, backgroundColor: C.bg, maxHeight: "45vh", overflow: "auto" }}>
             <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 32px" }}>
-              <AiEditor key={aiKey} text={text} C={C} onApply={handleApplyAi} session={session} />
+              <AiEditor key={aiKey} text={editorRef.current ? editorRef.current.getText() : text.replace(/<[^>]*>/g, "")} C={C} onApply={handleApplyAi} session={session} />
             </div>
           </div>
         </div>
@@ -697,15 +732,13 @@ Your AI editor can proofread this or transform it into a polished editorial piec
             {/* Attach */}
             <div style={{ padding: "24px 20px" }}>
               <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 12 }}>Attach</div>
-              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoSelect} />
-              <button onClick={() => { setAttachPanel(attachPanel === "photo" ? null : "photo"); fileInputRef.current?.click(); }} disabled={photoUploading} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, width: "100%", background: "none", border: `1px solid ${C.rule}`, cursor: photoUploading ? "default" : "pointer", fontFamily: F.sans, fontSize: 12, color: C.inkLight, textAlign: "left", opacity: photoUploading ? 0.6 : 1 }}>
-                <span>📷</span>{photoUploading ? "Uploading..." : "Photo"}
-              </button>
               <button onClick={() => setAttachPanel(attachPanel === "location" ? null : "location")} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, width: "100%", background: "none", border: `1px solid ${attachPanel === "location" ? C.accent : C.rule}`, cursor: "pointer", fontFamily: F.sans, fontSize: 12, color: C.inkLight, textAlign: "left" }}>
-                <span>📍</span>Location
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                Location
               </button>
               <button onClick={() => setAttachPanel(attachPanel === "link" ? null : "link")} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, width: "100%", background: "none", border: `1px solid ${attachPanel === "link" ? C.accent : C.rule}`, cursor: "pointer", fontFamily: F.sans, fontSize: 12, color: C.inkLight, textAlign: "left" }}>
-                <span>🔗</span>Link
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                Link
               </button>
 
               {/* Location inline form */}
@@ -1283,10 +1316,102 @@ function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, on
 }
 
 // ============================================================
+// COVER IMAGE STEP — Sub-component for EditionBuilder
+// ============================================================
+function CoverImageStep({ C, selectedIds, coverImageUrl, setCoverImageUrl, coverUploading, setCoverUploading, userId, onBack, onContinue, fetchPhotoAttachmentsForEntries, uploadAttachment }) {
+  const [entryPhotos, setEntryPhotos] = useState([]);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (selectedIds.length === 0) return;
+    fetchPhotoAttachmentsForEntries(selectedIds).then(setEntryPhotos);
+  }, [selectedIds, fetchPhotoAttachmentsForEntries]);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    setCoverUploading(true);
+    try {
+      const url = await uploadAttachment(userId, file);
+      setCoverImageUrl(url);
+    } catch (err) {
+      console.error("Cover upload failed:", err);
+    } finally {
+      setCoverUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
+      <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Cover Image</h2>
+      <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 24 }}>
+        Choose an image for your edition cover. Upload from your computer or pick from images in your selected entries.
+      </p>
+
+      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleUpload} />
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={coverUploading}
+          style={{
+            width: 140, height: 140, border: `2px dashed ${C.rule}`,
+            backgroundColor: C.sectionBg, cursor: coverUploading ? "default" : "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6,
+            fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+          }}
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.inkMuted} strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          {coverUploading ? "Uploading..." : "Upload"}
+        </button>
+
+        {entryPhotos.map((p, idx) => (
+          <button
+            key={`cover-${p.entry_id}-${idx}`}
+            onClick={() => setCoverImageUrl(coverImageUrl === p.url ? null : p.url)}
+            style={{
+              width: 140, height: 140, padding: 0, border: `2px solid ${coverImageUrl === p.url ? C.ink : C.rule}`,
+              overflow: "hidden", cursor: "pointer", flexShrink: 0,
+            }}
+          >
+            <img src={p.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          </button>
+        ))}
+      </div>
+
+      {coverImageUrl && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Selected cover</div>
+          <div style={{ position: "relative", width: "100%", maxWidth: 360, height: 180, backgroundColor: C.sectionBg, overflow: "hidden" }}>
+            <img src={coverImageUrl} alt="Cover" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          </div>
+          <button
+            onClick={() => setCoverImageUrl(null)}
+            style={{ marginTop: 8, fontFamily: F.sans, fontSize: 11, color: C.inkMuted, background: "none", border: "none", cursor: "pointer" }}
+          >Clear selection</button>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <button onClick={onBack} style={{
+          fontFamily: F.sans, fontSize: 12, color: C.inkMuted, background: "none",
+          border: `1px solid ${C.rule}`, padding: "10px 24px", cursor: "pointer",
+        }}>← Back</button>
+        <button onClick={onContinue} style={{
+          fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.bg,
+          backgroundColor: C.ink, border: "none", padding: "10px 32px", cursor: "pointer",
+        }}>Continue — Add Links</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // EDITION BUILDER — Publisher creates custom editions
 // ============================================================
 function EditionBuilder({ C, userId, session, onClose, onCreated }) {
-  const [step, setStep] = useState(1); // 1=setup, 2=select entries, 3=arrange, 4=links, 5=preview/publish
+  const [step, setStep] = useState(1); // 1=setup, 2=select, 3=cover, 4=arrange, 5=links, 6=preview
   const [title, setTitle] = useState("");
   const [weekStart, setWeekStart] = useState(new Date().toISOString().slice(0, 10));
   const [weekEnd, setWeekEnd] = useState(new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10));
@@ -1301,6 +1426,8 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
   const [generatingAI, setGeneratingAI] = useState(false);
   const [sectionFilter, setSectionFilter] = useState("all");
   const [dragIdx, setDragIdx] = useState(null);
+  const [coverImageUrl, setCoverImageUrl] = useState(null);
+  const [coverUploading, setCoverUploading] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -1407,6 +1534,7 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
         links: linkData,
         isPublic: false,
         shareMode: "full",
+        coverImageUrl: coverImageUrl || null,
       });
       if (onCreated) onCreated();
       onClose();
@@ -1443,7 +1571,7 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
           border: "none", cursor: "pointer",
         }}>← Cancel</button>
         <span style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, color: C.ink }}>
-          New Edition {step > 1 && `· Step ${step}/5`}
+          New Edition {step > 1 && `· Step ${step}/6`}
         </span>
         <div style={{ width: 80 }} />
       </div>
@@ -1731,13 +1859,30 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
               <button onClick={() => setStep(4)} style={{
                 fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.bg,
                 backgroundColor: C.ink, border: "none", padding: "10px 32px", cursor: "pointer",
-              }}>Continue — Add Links</button>
+              }}>Continue — Cover Image</button>
             </div>
           </div>
         )}
 
-        {/* STEP 4: External Links */}
+        {/* STEP 4: Cover Image */}
         {step === 4 && (
+          <CoverImageStep
+            C={C}
+            selectedIds={selectedIds}
+            coverImageUrl={coverImageUrl}
+            setCoverImageUrl={setCoverImageUrl}
+            coverUploading={coverUploading}
+            setCoverUploading={setCoverUploading}
+            userId={userId}
+            onBack={() => setStep(3)}
+            onContinue={() => setStep(5)}
+            fetchPhotoAttachmentsForEntries={fetchPhotoAttachmentsForEntries}
+            uploadAttachment={uploadAttachment}
+          />
+        )}
+
+        {/* STEP 5: External Links */}
+        {step === 5 && (
           <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
             <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 4 }}>External Recommendations</h2>
             <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 20 }}>
@@ -1803,11 +1948,11 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
             }}>+ Add Recommendation</button>
 
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <button onClick={() => setStep(3)} style={{
+              <button onClick={() => setStep(4)} style={{
                 fontFamily: F.sans, fontSize: 12, color: C.inkMuted, background: "none",
                 border: `1px solid ${C.rule}`, padding: "10px 24px", cursor: "pointer",
               }}>← Back</button>
-              <button onClick={() => setStep(5)} style={{
+              <button onClick={() => setStep(6)} style={{
                 fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.bg,
                 backgroundColor: C.ink, border: "none", padding: "10px 32px", cursor: "pointer",
               }}>Continue — Preview</button>
@@ -1815,8 +1960,8 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
           </div>
         )}
 
-        {/* STEP 5: Preview & Publish */}
-        {step === 5 && (
+        {/* STEP 6: Preview & Publish */}
+        {step === 6 && (
           <div style={{ animation: "fadeIn 0.3s ease" }}>
             <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Preview & Publish</h2>
             <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 24 }}>
@@ -1893,7 +2038,7 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <button onClick={() => setStep(4)} style={{
+              <button onClick={() => setStep(5)} style={{
                 fontFamily: F.sans, fontSize: 12, color: C.inkMuted, background: "none",
                 border: `1px solid ${C.rule}`, padding: "10px 24px", cursor: "pointer",
               }}>← Back</button>
@@ -2073,35 +2218,36 @@ function ArchivesView({ C, userId, user, session, onSelectEdition, onSwitchToEdi
               onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-4px)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
             >
-              {/* Cover image area — placeholder */}
+              {/* Cover image area */}
               <div style={{
                 height: 200, overflow: "hidden",
                 border: `1px solid ${C.rule}`, borderBottom: "none", position: "relative",
                 backgroundColor: C.sectionBg,
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
-                </svg>
+                {ed.coverImageUrl ? (
+                  <img src={ed.coverImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+                  </svg>
+                )}
                 <div style={{
                   position: "absolute", top: 12, left: 14,
                   fontFamily: F.sans, fontSize: 9, fontWeight: 600,
                   color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1.5px",
                 }}>Vol. I · No. {ed.num}</div>
-                <div style={{
-                  position: "absolute", bottom: 12, left: 14,
-                  fontFamily: F.sans, fontSize: 10, color: C.inkMuted,
-                }}>{ed.week}, {ed.year}</div>
               </div>
-              {/* Card body */}
+              {/* Card body — uniform height */}
               <div style={{
                 border: `1px solid ${C.rule}`, borderTop: `2px solid ${C.ink}`,
-                padding: "14px 14px 16px",
+                padding: "14px 14px 16px", minHeight: 140,
               }}>
-                <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>{ed.topSection}</div>
+                <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>{ed.publicationDate}</div>
                 <h3 style={{
                   fontFamily: F.display, fontSize: 16, fontWeight: 700,
-                  lineHeight: 1.3, color: C.ink, marginBottom: 8, minHeight: 42,
+                  lineHeight: 1.3, color: C.ink, marginBottom: 8,
+                  overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
                 }}>{ed.headline}</h3>
                 <div style={{ display: "flex", justifyContent: "space-between", fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
                   <span>{ed.entries} entries</span>
@@ -2324,7 +2470,11 @@ function ReflectionsView({ C, userId }) {
   const P = period === "custom" ? customPeriod : periodsData[period];
 
   if (loading) return <LoadingBlock C={C} text="Loading reflections..." />;
-  if (!P) return <LoadingBlock C={C} text="No reflection data for this period" />;
+  if (!P) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", animation: "fadeIn 0.3s ease" }}>
+      <span style={{ fontFamily: F.sans, fontSize: 13, color: C.inkMuted }}>No reflection data for this period</span>
+    </div>
+  );
 
   const handleAsk = () => {
     if (!askQuery.trim()) return;
@@ -3512,14 +3662,12 @@ function AdminDashboardTab({ C, session }) {
 // ============================================================
 // ARTICLE VIEW — Full-screen reading experience
 // ============================================================
-function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, siblingEntries, onNavigateToEntry }) {
-  const [showOriginal, setShowOriginal] = useState(false);
+function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, siblingEntries, onNavigateToEntry, userId, onStartEdit }) {
   const [shareCopied, setShareCopied] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
-    setShowOriginal(false);
   }, [entry?.id]);
 
   useEffect(() => {
@@ -3547,7 +3695,7 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
 
   const readTime = Math.max(1, Math.ceil((entry.word_count || 0) / 230));
   const hasAiEdit = entry.ai_edit?.applied;
-  const showAiVersion = hasAiEdit && isProUser && !showOriginal;
+  const showAiVersion = hasAiEdit && isProUser;
 
   const headline = showAiVersion && entry.ai_edit.headline
     ? entry.ai_edit.headline
@@ -3558,9 +3706,8 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
   const bodyText = showAiVersion
     ? entry.ai_edit.edited_body
     : entry.body;
-  const paragraphs = (bodyText || "").split("\n\n").filter(Boolean);
 
-  const useDropCap = showAiVersion && entry.ai_edit?.mode === "rewrite";
+  const useDropCapFlag = showAiVersion && entry.ai_edit?.mode === "rewrite";
 
   const photo = (entry.attachments || []).find((a) => a.type === "photo");
 
@@ -3573,6 +3720,13 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
     `${readTime} min read`,
     `via ${SOURCE_MAP[entry.source] || entry.source}`,
   ];
+  const updatedDate = entry.updated_at ? new Date(entry.updated_at) : null;
+  const createdDateTs = new Date(entry.created_at).getTime();
+  const isEdited = updatedDate && updatedDate.getTime() - createdDateTs > 2000;
+  if (isEdited) {
+    const edStr = `${months[updatedDate.getMonth()]} ${updatedDate.getDate()}, ${updatedDate.getFullYear()}`;
+    metaParts.push(`last edited ${edStr}`);
+  }
   if (entry.mood != null && MOOD_MAP[entry.mood]) {
     metaParts.push(MOOD_MAP[entry.mood].emoji);
   }
@@ -3598,10 +3752,23 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
           Back
         </button>
-        <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, letterSpacing: "0.5px" }}>
+        <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>
           {edCtx ? `Vol. ${edCtx.volume} · No. ${edCtx.number || edCtx.num}` : "Notebook"}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {userId && entry.user_id === userId && onStartEdit && (
+            <button
+              onClick={() => onStartEdit(entry)}
+              style={{
+                display: "flex", alignItems: "center", gap: 4, background: "none",
+                border: `1px solid ${C.rule}`, padding: "4px 10px", cursor: "pointer",
+                fontFamily: F.sans, fontSize: 10, color: C.inkMuted,
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Edit
+            </button>
+          )}
           {entry.is_public && (
             <button onClick={() => {
               const url = `${window.location.origin}/entry/${entry.id}`;
@@ -3718,58 +3885,9 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
             </div>
           )}
 
-          {/* Toggle Original/Edited */}
-          {hasAiEdit && isProUser && (
-            <div style={{
-              display: "flex", justifyContent: "flex-end", marginBottom: 20, gap: 0,
-            }}>
-              <button onClick={() => setShowOriginal(false)} style={{
-                fontFamily: F.sans, fontSize: 10, fontWeight: showOriginal ? 400 : 600,
-                color: showOriginal ? C.inkMuted : C.ink,
-                backgroundColor: showOriginal ? "transparent" : C.sectionBg,
-                border: `1px solid ${C.rule}`, padding: "5px 14px",
-                cursor: "pointer", borderRight: "none",
-              }}>Edited</button>
-              <button onClick={() => setShowOriginal(true)} style={{
-                fontFamily: F.sans, fontSize: 10, fontWeight: showOriginal ? 600 : 400,
-                color: showOriginal ? C.ink : C.inkMuted,
-                backgroundColor: showOriginal ? C.sectionBg : "transparent",
-                border: `1px solid ${C.rule}`, padding: "5px 14px",
-                cursor: "pointer",
-              }}>Original</button>
-            </div>
-          )}
-
-          {/* Original text notice */}
-          {showOriginal && (
-            <p style={{
-              fontFamily: F.body, fontSize: 12, fontStyle: "italic",
-              color: C.inkFaint, marginBottom: 20,
-              animation: "fadeIn 0.3s ease",
-            }}>
-              This is your original text, before AI editing.
-            </p>
-          )}
-
           {/* Body text */}
-          <div style={{ animation: "fadeIn 0.3s ease" }} key={showOriginal ? "original" : "edited"}>
-            {paragraphs.map((p, i) => (
-              <p key={i} style={{
-                fontFamily: F.body, fontSize: 18, lineHeight: 1.85,
-                color: C.inkLight, marginBottom: 20,
-              }}>
-                {i === 0 && useDropCap && !showOriginal && p.length > 0 ? (
-                  <>
-                    <span style={{
-                      fontFamily: F.display, fontSize: 58, fontWeight: 700,
-                      float: "left", lineHeight: 1, marginRight: 8,
-                      color: C.ink,
-                    }}>{p[0]}</span>
-                    {p.slice(1)}
-                  </>
-                ) : p}
-              </p>
-            ))}
+          <div style={{ animation: "fadeIn 0.3s ease" }}>
+            <RichTextContent text={bodyText} C={C} useDropCap={useDropCapFlag} />
           </div>
 
           {/* ARTICLE FOOTER */}
@@ -3961,8 +4079,7 @@ function PublicEntryView() {
   const headline = hasAiEdit && entry.ai_edit.headline ? entry.ai_edit.headline : entry.title;
   const subhead = hasAiEdit && entry.ai_edit.subhead ? entry.ai_edit.subhead : null;
   const bodyText = hasAiEdit ? entry.ai_edit.edited_body : entry.body;
-  const paragraphs = (bodyText || "").split("\n\n").filter(Boolean);
-  const useDropCap = hasAiEdit && entry.ai_edit?.mode === "rewrite";
+  const useDropCapPublic = hasAiEdit && entry.ai_edit?.mode === "rewrite";
   const photo = (entry.attachments || []).find((a) => a.type === "photo");
 
   const createdDate = new Date(entry.created_at);
@@ -4071,22 +4188,7 @@ function PublicEntryView() {
         )}
 
         {/* Body */}
-        {paragraphs.map((p, i) => (
-          <p key={i} style={{
-            fontFamily: F.body, fontSize: 18, lineHeight: 1.85,
-            color: "#3a3a3a", marginBottom: 20,
-          }}>
-            {useDropCap && i === 0 ? (
-              <>
-                <span style={{
-                  fontFamily: F.display, fontSize: 58, float: "left", lineHeight: 1,
-                  marginRight: 8, fontWeight: 700, color: "#121212",
-                }}>{p[0]}</span>
-                {p.slice(1)}
-              </>
-            ) : p}
-          </p>
-        ))}
+        <RichTextContent text={bodyText} C={{ ink: "#121212", inkLight: "#3a3a3a", accent: "#c41e1e", rule: "#e2e2e2", sectionBg: "#f7f7f7" }} useDropCap={useDropCapPublic} />
 
         {/* Footer divider */}
         <div style={{ height: 1, backgroundColor: "#e2e2e2", margin: "40px 0 24px" }} />
@@ -4396,6 +4498,7 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [articleEntry, setArticleEntry] = useState(null);
   const [articleList, setArticleList] = useState([]);
+  const [editingEntry, setEditingEntry] = useState(null);
   const [articleIndex, setArticleIndex] = useState(0);
   const [pubName, setPubName] = useState("The Deborah Times");
   const [motto, setMotto] = useState("All the life that's fit to print");
@@ -4862,9 +4965,24 @@ export default function App() {
       </div>
 
       {editorOpen && <EditorView onClose={() => setEditorOpen(false)} onPublished={handleRefresh} C={C} userId={userId} session={session} />}
+      {editingEntry && (
+        <EditorView
+          initialEntry={editingEntry}
+          onClose={() => setEditingEntry(null)}
+          onPublished={(updated) => {
+            setArticleEntry(updated);
+            setArticleList((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+            setEditingEntry(null);
+            handleRefresh();
+          }}
+          C={C}
+          userId={userId}
+          session={session}
+        />
+      )}
       <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} pubName={pubName} setPubName={setPubName} motto={motto} setMotto={setMotto} city={city} setCity={setCity} userId={userId} />
       {adminOpen && <AdminPage C={C} onClose={() => setAdminOpen(false)} session={session} />}
-      {articleEntry && (
+      {articleEntry && !editingEntry && (
         <ArticleView
           entry={articleEntry}
           edition={articleEntry.edition || null}
@@ -4881,6 +4999,8 @@ export default function App() {
               setArticleEntry(articleList[idx]);
             }
           }}
+          userId={userId}
+          onStartEdit={(e) => setEditingEntry(e)}
         />
       )}
     </div>

@@ -290,6 +290,22 @@ async function generateForUser(
       .from("edition_entries")
       .insert(rowsToInsert);
     if (insertErr) throw insertErr;
+
+    // Auto-set cover from first entry's photo attachment
+    const firstEntryId = orderedIds[0];
+    const { data: photoRow } = await supabase
+      .from("attachments")
+      .select("url")
+      .eq("entry_id", firstEntryId)
+      .eq("type", "photo")
+      .limit(1)
+      .maybeSingle();
+    if (photoRow?.url) {
+      await supabase
+        .from("editions")
+        .update({ cover_image_url: photoRow.url })
+        .eq("id", editionId);
+    }
   }
 
   return {

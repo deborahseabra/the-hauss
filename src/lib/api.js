@@ -6,6 +6,11 @@
  */
 
 import { supabase } from "../supabaseClient";
+
+function stripHtmlTags(html) {
+  if (!html) return "";
+  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+}
 import { encrypt, decrypt, decryptOptional } from "./crypto";
 
 // ---------------------------------------------------------------------------
@@ -58,6 +63,12 @@ function formatDate(dateStr) {
   const d = new Date(dateStr);
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${months[d.getMonth()]} ${d.getDate()}`;
+}
+
+function formatPublicationDateShort(dateStr) {
+  const d = new Date(dateStr);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
 function formatDayOfWeek(dateStr) {
@@ -337,8 +348,8 @@ async function buildEditionViewData(edition, decryptedEntries, userId) {
     return {
       id: e.id,
       section: SECTION_UPPER[e.section] || e.section.toUpperCase(),
-      headline: e.title || e.body.slice(0, 60) + "...",
-      subhead: e.title ? e.body.slice(0, 120) + (e.body.length > 120 ? "..." : "") : "",
+      headline: e.title || stripHtmlTags(e.body).slice(0, 60) + "...",
+      subhead: e.title ? stripHtmlTags(e.body).slice(0, 120) + (stripHtmlTags(e.body).length > 120 ? "..." : "") : "",
       excerpt: e.body,
       readTime: estimateReadTime(e.word_count),
       date: formatDate(e.created_at),
@@ -357,7 +368,8 @@ async function buildEditionViewData(edition, decryptedEntries, userId) {
     const dayName = dayNames[d.getDay()];
     if (!briefingMap[dayName]) {
       const body = ee.entry.body;
-      briefingMap[dayName] = body.length > 80 ? body.slice(0, 77) + "..." : body;
+      const plainBody = stripHtmlTags(body);
+      briefingMap[dayName] = plainBody.length > 80 ? plainBody.slice(0, 77) + "..." : plainBody;
     }
   }
   const briefing = weekDays.map((day) => ({
@@ -626,7 +638,35 @@ export async function fetchAllEditions(userId) {
       const moods = ["⚡", "🌧", "🌤", "☀️", "🌙"];
       const moodEmoji = moods[ed.number % moods.length];
 
-      // Determine top section from first entry in this edition
+      // Publication date (short format)
+      const publicationDate = formatPublicationDateShort(ed.created_at || ed.week_start);
+
+      // Cover image: use stored URL, else first photo from entries (by display_order)
+      let coverImageUrl = ed.cover_image_url || null;
+      if (!coverImageUrl) {
+        const { data: eeList } = await supabase
+          .from("edition_entries")
+          .select("entry_id, display_order")
+          .eq("edition_id", ed.id)
+          .order("display_order", { ascending: true });
+        const entryOrder = (eeList || []).reduce((acc, ee) => {
+          acc[ee.entry_id] = ee.display_order;
+          return acc;
+        }, {});
+        const { data: photos } = await supabase
+          .from("attachments")
+          .select("entry_id, url")
+          .in("entry_id", Object.keys(entryOrder))
+          .eq("type", "photo");
+        if (photos && photos.length > 0) {
+          const sorted = [...photos].sort(
+            (a, b) => (entryOrder[a.entry_id] ?? 999) - (entryOrder[b.entry_id] ?? 999)
+          );
+          coverImageUrl = sorted[0].url;
+        }
+      }
+
+      // Top section from first entry (for list view)
       let topSection = "Dispatch";
       const { data: topEntry } = await supabase
         .from("edition_entries")
@@ -650,6 +690,8 @@ export async function fetchAllEditions(userId) {
         headline,
         edNote,
         topSection,
+        publicationDate,
+        coverImageUrl,
         entries: ed.entry_count,
         words: ed.word_count,
         mood: moodEmoji,
@@ -667,6 +709,20 @@ export async function fetchAllEditions(userId) {
 /**
  * Fetches all user entries (lightweight) for the edition builder selection UI.
  */
+/**
+ * Fetches photo attachment URLs for the given entry IDs (for cover image picker).
+ */
+export async function fetchPhotoAttachmentsForEntries(entryIds) {
+  if (!entryIds || entryIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("attachments")
+    .select("entry_id, url")
+    .in("entry_id", entryIds)
+    .eq("type", "photo");
+  if (error) return [];
+  return data || [];
+}
+
 export async function fetchUserEntriesForBuilder(userId) {
   const { data, error } = await supabase
     .from("entries")
@@ -682,7 +738,7 @@ export async function fetchUserEntriesForBuilder(userId) {
       const body = await decrypt(e.body_encrypted);
       return {
         id: e.id,
-        title: title || body.slice(0, 60) + (body.length > 60 ? "..." : ""),
+        title: title || stripHtmlTags(body).slice(0, 60) + (stripHtmlTags(body).length > 60 ? "..." : ""),
         body,
         section: e.section,
         word_count: e.word_count || 0,
@@ -727,6 +783,7 @@ export async function createCustomEdition(userId, {
   links,
   isPublic,
   shareMode,
+  coverImageUrl,
 }) {
   const { count: editionCount } = await supabase
     .from("editions")
@@ -767,6 +824,7 @@ export async function createCustomEdition(userId, {
       share_mode: shareMode || "cover",
       publication_city: pubCity,
       publication_temperature: pubTemp,
+      cover_image_url: coverImageUrl || null,
     })
     .select()
     .single();
@@ -859,8 +917,8 @@ export async function fetchSections(userId) {
   return ordered.map((sec) => {
     const topEntries = sec.entries.slice(0, 3).map((e) => ({
       id: e.id,
-      headline: e.title || e.body.slice(0, 60) + "...",
-      sub: e.title ? e.body.slice(0, 100) + (e.body.length > 100 ? "..." : "") : "",
+      headline: e.title || stripHtmlTags(e.body).slice(0, 60) + "...",
+      sub: e.title ? stripHtmlTags(e.body).slice(0, 100) + (stripHtmlTags(e.body).length > 100 ? "..." : "") : "",
       time: estimateReadTime(e.word_count),
     }));
 
@@ -1056,6 +1114,59 @@ export async function createEntry({ userId, title, body, section, mood, isPublic
   return decryptEntry(data);
 }
 
+/**
+ * Updates an existing entry. Encrypts title/body, updates word_count.
+ * The updated_at column is auto-updated by DB trigger.
+ */
+export async function updateEntry({ entryId, userId, title, body, section, mood, isPublic }) {
+  const plainBody = stripHtmlTags(body || "");
+  const wordCount = plainBody.split(/\s+/).filter(Boolean).length;
+
+  const [titleHex, bodyHex] = await Promise.all([
+    title != null ? (title.trim() ? encrypt(title.trim()) : Promise.resolve(null)) : undefined,
+    body != null ? encrypt(body) : undefined,
+  ]);
+
+  const updates = { word_count: wordCount };
+  if (titleHex !== undefined) updates.title_encrypted = titleHex;
+  if (bodyHex !== undefined) updates.body_encrypted = bodyHex;
+  if (section !== undefined) updates.section = section;
+  if (mood !== undefined) updates.mood = mood;
+  if (isPublic !== undefined) updates.is_public = isPublic;
+
+  const { data, error } = await supabase
+    .from("entries")
+    .update(updates)
+    .eq("id", entryId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return decryptEntry(data);
+}
+
+/**
+ * Fetches a single entry by ID for the current user (full with ai_edits, attachments).
+ */
+export async function fetchEntryFull(userId, entryId) {
+  const { data, error } = await supabase
+    .from("entries")
+    .select(`
+      id, user_id, section, title_encrypted, body_encrypted, mood, is_public,
+      source, word_count, created_at, updated_at,
+      ai_edits(mode, tone, headline_encrypted, subhead_encrypted,
+        result_encrypted, original_encrypted, changes_count, applied),
+      attachments(type, url, metadata)
+    `)
+    .eq("id", entryId)
+    .eq("user_id", userId)
+    .single();
+
+  if (error) throw error;
+  return decryptEntryFull(data);
+}
+
 // ---------------------------------------------------------------------------
 // Write: Profile
 // ---------------------------------------------------------------------------
@@ -1115,12 +1226,18 @@ export async function updatePrompt(id, fields) {
 // ---------------------------------------------------------------------------
 
 export async function uploadAttachment(userId, file) {
-  const ext = file.name.split(".").pop();
+  let processed = file;
+  if (file.type.startsWith("image/")) {
+    const { resizeImage } = await import("./imageResize");
+    processed = await resizeImage(file);
+  }
+
+  const ext = processed.name.split(".").pop();
   const filePath = `${userId}/${crypto.randomUUID()}.${ext}`;
 
   const { error: uploadError } = await supabase.storage
     .from("attachments")
-    .upload(filePath, file, { contentType: file.type });
+    .upload(filePath, processed, { contentType: processed.type });
 
   if (uploadError) throw uploadError;
 
