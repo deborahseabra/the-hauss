@@ -55,3 +55,39 @@ SELECT cron.schedule(
 ```
 
 After running this, the crons will use your secret and the old one (if it was exposed) will no longer work.
+
+---
+
+## Removing the exposed secret from Git history (optional)
+
+After rotating the secret, you can rewrite Git history so the old value no longer appears in any commit on GitHub. This changes commit hashes, so anyone who cloned the repo should re-clone after you force-push.
+
+1. **Backup** (optional but recommended):
+   ```bash
+   git clone https://github.com/deborahseabra/the-hauss.git the-hauss-backup
+   ```
+
+2. **Install git-filter-repo** (one of):
+   ```bash
+   brew install git-filter-repo
+   # or: pip install git-filter-repo
+   ```
+
+3. **From your repo root**, replace the old secret in all history with a placeholder:
+   ```bash
+   git filter-repo --replace-text <(echo 'REPLACE_CRON_SECRET_AFTER_DEPLOY==>REPLACE_CRON_SECRET_AFTER_DEPLOY') --force
+   ```
+   (`--force` is needed because the tool avoids rewriting repos that have remotes.)
+
+4. **Re-add the GitHub remote** (filter-repo removes remotes):
+   ```bash
+   git remote add origin https://github.com/deborahseabra/the-hauss.git
+   ```
+
+5. **Force-push** to overwrite history on GitHub:
+   ```bash
+   git push --force --all origin
+   git push --force --tags origin
+   ```
+
+After this, the old secret will no longer appear in the repo history. You still must have rotated the secret (new value in Supabase and in the cron SQL) — removing from history only cleans up the leaked value from the past.
