@@ -305,7 +305,7 @@ CSS: `grid-template-columns: 1fr 1fr 1fr; gap: 24px` with `borderRight` on items
 ### Navigation Bar
 
 ```
-──── MY JOURNAL    LAST EDITION    ARCHIVES    SECTIONS    ✦ REFLECTIONS ────
+──── NOTEBOOK    LAST EDITION    ARCHIVES    SECTIONS    ✦ REFLECTIONS ────
 ```
 
 - Centered flex layout, gap: 24px

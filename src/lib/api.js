@@ -284,7 +284,7 @@ export async function fetchPublicEntry(entryId) {
 export async function fetchPublicProfile(userId) {
   const { data } = await supabase
     .from("profiles")
-    .select("name, publication_name")
+    .select("name, publication_name, motto, city")
     .eq("id", userId)
     .single();
   return data;
@@ -385,6 +385,10 @@ async function buildEditionViewData(edition, decryptedEntries, userId) {
   const featured = topStories.filter((s) => s.isFeatured);
   const rest = topStories.filter((s) => !s.isFeatured);
 
+  const pubDate = edition.created_at
+    ? new Date(edition.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+
   return {
     edition: {
       id: edition.id,
@@ -397,6 +401,11 @@ async function buildEditionViewData(edition, decryptedEntries, userId) {
       entryCount: edition.entry_count,
       is_public: Boolean(edition.is_public),
       share_mode: edition.share_mode || "cover",
+      is_custom: Boolean(edition.is_custom),
+      publication_date: pubDate,
+      created_at: edition.created_at,
+      publication_city: edition.publication_city || null,
+      publication_temperature: edition.publication_temperature ?? null,
     },
     topStories: featured.length >= 2 ? featured.slice(0, 2) : [...featured, ...rest].slice(0, 2),
     briefing,
@@ -519,55 +528,76 @@ export async function fetchPublicEdition(editionId) {
   if (edError) throw edError;
   if (!edition) return null;
 
-  // Cover mode does not expose full entry reading.
-  if (edition.share_mode !== "full") {
-    return {
-      mode: "cover",
-      edition: {
-        id: edition.id,
-        volume: edition.volume,
-        num: edition.number,
-        week: formatWeekRange(edition.week_start, edition.week_end),
-        week_start: edition.week_start,
-        week_end: edition.week_end,
-        number: `Vol. ${edition.volume} · No. ${edition.number}`,
-        entryCount: edition.entry_count,
-      },
-      stats: {
-        totalEntries: edition.entry_count || 0,
-        thisEdition: edition.entry_count || 0,
-        editions: 1,
-        wordsThisWeek: edition.word_count || 0,
-      },
-      topStories: [],
-      briefing: [],
-      editorial: {
-        headline: "The Editor's Note",
-        content: "",
-      },
-      sections: [],
-      moreStories: [],
-    };
+  const mode = edition.share_mode === "full" ? "full" : "cover";
+
+  // Fetch author profile for public display
+  const authorProfile = await fetchPublicProfile(edition.user_id);
+
+  // For full mode, entries are directly readable. For cover mode, we need
+  // to use the service-level data that RLS allows (edition_entries join).
+  // Cover mode RLS allows reading edition_entries but NOT the entries themselves
+  // for non-full editions, so we build a partial view from edition metadata.
+  if (mode === "full") {
+    const { data: edEntries, error: eeError } = await supabase
+      .from("edition_entries")
+      .select("*, entry:entries(*)")
+      .eq("edition_id", edition.id)
+      .order("display_order", { ascending: true });
+    if (eeError) throw eeError;
+
+    const decryptedEntries = await Promise.all(
+      (edEntries || [])
+        .filter((ee) => ee.entry)
+        .map(async (ee) => {
+          const entry = await decryptEntry(ee.entry);
+          return { ...ee, entry };
+        })
+    );
+
+    const data = await buildEditionViewData(edition, decryptedEntries, edition.user_id);
+    return { ...data, mode: "full", author: authorProfile };
   }
 
-  const { data: edEntries, error: eeError } = await supabase
-    .from("edition_entries")
-    .select("*, entry:entries(*)")
-    .eq("edition_id", edition.id)
-    .order("display_order", { ascending: true });
-  if (eeError) throw eeError;
+  // Cover mode: build layout from edition metadata only (entries are not exposed)
+  const editorial = await decryptOptional(edition.editorial_encrypted);
 
-  const decryptedEntries = await Promise.all(
-    (edEntries || [])
-      .filter((ee) => ee.entry)
-      .map(async (ee) => {
-        const entry = await decryptEntry(ee.entry);
-        return { ...ee, entry };
-      })
-  );
+  const pubDate = edition.created_at
+    ? new Date(edition.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
 
-  const data = await buildEditionViewData(edition, decryptedEntries, edition.user_id);
-  return { ...data, mode: "full" };
+  return {
+    mode: "cover",
+    author: authorProfile,
+    edition: {
+      id: edition.id,
+      volume: edition.volume,
+      num: edition.number,
+      week: formatWeekRange(edition.week_start, edition.week_end),
+      week_start: edition.week_start,
+      week_end: edition.week_end,
+      number: `Vol. ${edition.volume} · No. ${edition.number}`,
+      entryCount: edition.entry_count,
+      is_custom: Boolean(edition.is_custom),
+      publication_date: pubDate,
+      created_at: edition.created_at,
+      publication_city: edition.publication_city || null,
+      publication_temperature: edition.publication_temperature ?? null,
+    },
+    stats: {
+      totalEntries: edition.entry_count || 0,
+      thisEdition: edition.entry_count || 0,
+      editions: 1,
+      wordsThisWeek: edition.word_count || 0,
+    },
+    topStories: [],
+    briefing: [],
+    editorial: {
+      headline: "The Editor's Note",
+      content: editorial || "",
+    },
+    sections: [],
+    moreStories: [],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -583,23 +613,43 @@ export async function fetchAllEditions(userId) {
 
   if (error) throw error;
 
-  // Decrypt editorials to extract headlines
   const results = await Promise.all(
     editions.map(async (ed) => {
       const editorial = await decryptOptional(ed.editorial_encrypted);
       const headline = editorial
         ? editorial.split(".")[0].slice(0, 60)
         : `Edition No. ${ed.number}`;
+      const edNote = editorial
+        ? editorial.slice(0, 160) + (editorial.length > 160 ? "..." : "")
+        : "";
 
-      // Derive a mood from week number pattern
       const moods = ["⚡", "🌧", "🌤", "☀️", "🌙"];
       const moodEmoji = moods[ed.number % moods.length];
 
+      // Determine top section from first entry in this edition
+      let topSection = "Dispatch";
+      const { data: topEntry } = await supabase
+        .from("edition_entries")
+        .select("entry:entries(section)")
+        .eq("edition_id", ed.id)
+        .order("display_order", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (topEntry?.entry?.section) {
+        topSection = ARTICLE_SECTION_LABELS[topEntry.entry.section] || topEntry.entry.section;
+      }
+
+      const year = ed.week_start ? ed.week_start.slice(0, 4) : "2026";
+
       return {
         id: ed.id,
-        num: `No. ${ed.number}`,
+        num: ed.number,
+        numLabel: `No. ${ed.number}`,
         week: formatWeekShort(ed.week_start, ed.week_end),
+        year,
         headline,
+        edNote,
+        topSection,
         entries: ed.entry_count,
         words: ed.word_count,
         mood: moodEmoji,
@@ -608,6 +658,178 @@ export async function fetchAllEditions(userId) {
   );
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Custom Editions (Publisher tier)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches all user entries (lightweight) for the edition builder selection UI.
+ */
+export async function fetchUserEntriesForBuilder(userId) {
+  const { data, error } = await supabase
+    .from("entries")
+    .select("id, section, title_encrypted, body_encrypted, word_count, created_at, is_public")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  return Promise.all(
+    data.map(async (e) => {
+      const title = e.title_encrypted ? await decrypt(e.title_encrypted) : null;
+      const body = await decrypt(e.body_encrypted);
+      return {
+        id: e.id,
+        title: title || body.slice(0, 60) + (body.length > 60 ? "..." : ""),
+        body,
+        section: e.section,
+        word_count: e.word_count || 0,
+        created_at: e.created_at,
+        is_public: e.is_public,
+        date: formatDate(e.created_at),
+        readTime: estimateReadTime(e.word_count),
+      };
+    })
+  );
+}
+
+export async function fetchCityWeather(city) {
+  try {
+    const geoRes = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(city)}&limit=1`);
+    const geoData = await geoRes.json();
+    const coords = geoData?.features?.[0]?.geometry?.coordinates;
+    if (!coords) return { temperature: null };
+    const [lng, lat] = coords;
+    const weatherRes = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`,
+    );
+    const weatherData = await weatherRes.json();
+    const temp = weatherData?.current_weather?.temperature;
+    return { temperature: typeof temp === "number" ? temp : null };
+  } catch {
+    return { temperature: null };
+  }
+}
+
+/**
+ * Creates a custom edition (Publisher-tier).
+ */
+export async function createCustomEdition(userId, {
+  title,
+  weekStart,
+  weekEnd,
+  entryIds,
+  featuredIds,
+  weekAtGlance,
+  editorialText,
+  links,
+  isPublic,
+  shareMode,
+}) {
+  const { count: editionCount } = await supabase
+    .from("editions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  const nextNumber = (editionCount || 0) + 1;
+  const totalWords = 0; // will be computed below
+
+  const editorialHex = editorialText ? await encrypt(editorialText) : null;
+
+  const { data: userProfile } = await supabase
+    .from("profiles")
+    .select("city")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const pubCity = userProfile?.city || null;
+  const { temperature: pubTemp } = pubCity
+    ? await fetchCityWeather(pubCity)
+    : { temperature: null };
+
+  const { data: edition, error: edError } = await supabase
+    .from("editions")
+    .insert({
+      user_id: userId,
+      week_start: weekStart,
+      week_end: weekEnd,
+      volume: 1,
+      number: nextNumber,
+      entry_count: entryIds.length,
+      word_count: totalWords,
+      editorial_encrypted: editorialHex,
+      is_custom: true,
+      custom_title: title || null,
+      custom_week_at_glance: weekAtGlance || null,
+      is_public: isPublic || false,
+      share_mode: shareMode || "cover",
+      publication_city: pubCity,
+      publication_temperature: pubTemp,
+    })
+    .select()
+    .single();
+
+  if (edError) throw edError;
+
+  // Insert edition_entries
+  if (entryIds.length > 0) {
+    const rows = entryIds.map((entryId, idx) => ({
+      edition_id: edition.id,
+      entry_id: entryId,
+      display_order: idx + 1,
+      is_featured: (featuredIds || []).includes(entryId),
+    }));
+    const { error: eeError } = await supabase
+      .from("edition_entries")
+      .insert(rows);
+    if (eeError) throw eeError;
+  }
+
+  // Insert edition_links
+  if (links && links.length > 0) {
+    const linkRows = links.map((link, idx) => ({
+      edition_id: edition.id,
+      user_id: userId,
+      title: link.title,
+      description: link.description || null,
+      url: link.url,
+      type: link.type || "read",
+      display_order: idx + 1,
+    }));
+    const { error: linkError } = await supabase
+      .from("edition_links")
+      .insert(linkRows);
+    if (linkError) throw linkError;
+  }
+
+  // Compute and update word count
+  const { data: wordData } = await supabase
+    .from("entries")
+    .select("word_count")
+    .in("id", entryIds);
+  const wc = (wordData || []).reduce((s, e) => s + (e.word_count || 0), 0);
+  await supabase
+    .from("editions")
+    .update({ word_count: wc })
+    .eq("id", edition.id);
+
+  return edition;
+}
+
+/**
+ * Fetches edition links for an edition.
+ */
+export async function fetchEditionLinks(editionId) {
+  const { data, error } = await supabase
+    .from("edition_links")
+    .select("*")
+    .eq("edition_id", editionId)
+    .order("display_order", { ascending: true });
+
+  if (error) throw error;
+  return data || [];
 }
 
 // ---------------------------------------------------------------------------
@@ -843,7 +1065,7 @@ export async function createEntry({ userId, title, body, section, mood, isPublic
  * Only sends fields that are provided (non-undefined).
  */
 export async function updateProfile(userId, fields) {
-  const allowed = ["publication_name", "motto", "theme_mode", "theme_accent"];
+  const allowed = ["publication_name", "motto", "theme_mode", "theme_accent", "city"];
   const updates = {};
   for (const key of allowed) {
     if (fields[key] !== undefined) updates[key] = fields[key];

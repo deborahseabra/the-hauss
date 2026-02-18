@@ -1,0 +1,183 @@
+import { useState } from "react";
+
+const F = {
+  display: "'Playfair Display', Georgia, serif",
+  body: "'Source Serif 4', Georgia, serif",
+  sans: "'IBM Plex Sans', -apple-system, sans-serif",
+  mono: "'IBM Plex Mono', monospace",
+};
+
+const C = {
+  bg: "#fff", ink: "#121212", inkLight: "#363636", inkMuted: "#727272",
+  inkFaint: "#999", rule: "#e2e2e2", ruleDark: "#121212",
+  accent: "#c41e1e", accentBg: "#fef5f5", sectionBg: "#f7f7f7",
+};
+
+const editions = [
+  { num: 47, week: "Feb 9–15", year: "2026", headline: "After Three Years of Doubt, She Finally Made the Leap", edNote: "This was a week of inflection. Your language shifted from observing to deciding. The recurring word was permission.", entries: 7, words: 4280, topSection: "Personal Essay", coverPhoto: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&q=80" },
+  { num: 46, week: "Feb 2–8", year: "2026", headline: "The Art of Staying When Everything Says Go", edNote: "Stillness was the theme. You wrote less but each entry carried more weight. Something is brewing under the surface.", entries: 5, words: 3100, topSection: "Letter to Self", coverPhoto: "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=400&q=80" },
+  { num: 45, week: "Jan 26–Feb 1", year: "2026", headline: "January Came and Went Like a Long Exhale", edNote: "A month of slow rebuilding. The restlessness of early January gave way to something quieter and more deliberate.", entries: 8, words: 5200, topSection: "Dispatch", coverPhoto: "https://images.unsplash.com/photo-1444723121867-7a241cacace9?w=400&q=80" },
+  { num: 44, week: "Jan 19–25", year: "2026", headline: "On Ambition, Mushroom Risotto, and Letting Things Be", edNote: "Food appeared in four of six entries this week. You're cooking your way through a decision.", entries: 6, words: 3900, topSection: "Personal Essay", coverPhoto: "https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?w=400&q=80" },
+  { num: 43, week: "Jan 12–18", year: "2026", headline: "A Quiet Week in a Loud City", edNote: "São Paulo was louder than usual. You were quieter. The contrast produced your most observational writing yet.", entries: 4, words: 2100, topSection: "Dispatch", coverPhoto: "https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=400&q=80" },
+  { num: 42, week: "Jan 5–11", year: "2026", headline: "New Year, Same Questions, Better Answers", edNote: "The year opened with familiar questions but your relationship to them has changed. You're answering instead of asking.", entries: 9, words: 6100, topSection: "Personal Essay", coverPhoto: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400&q=80" },
+  { num: 41, week: "Dec 29–Jan 4", year: "2025", headline: "The Year That Changed Everything (And the One That Might)", edNote: "A transitional week between two years. You looked back with tenderness and forward with something close to excitement.", entries: 11, words: 7800, topSection: "Review", coverPhoto: "https://images.unsplash.com/photo-1467810563316-b5476525c0f9?w=400&q=80" },
+  { num: 40, week: "Dec 22–28", year: "2025", headline: "Christmas Without the Script", edNote: "For the first time, you let the holidays happen without performing them. The result was your most honest writing about family.", entries: 5, words: 3400, topSection: "Letter to Self", coverPhoto: "https://images.unsplash.com/photo-1482139098788-9d12a6b4eed3?w=400&q=80" },
+  { num: 39, week: "Dec 15–21", year: "2025", headline: "She Stopped Running and Looked Around", edNote: "December's grief settled into stillness. You stopped trying to outrun it and wrote from inside it instead.", entries: 6, words: 4000, topSection: "Personal Essay", coverPhoto: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=80" },
+];
+
+export default function ArchivesView() {
+  const [viewMode, setViewMode] = useState("list");
+  const [yearFilter, setYearFilter] = useState("2026");
+  const filtered = editions.filter(e => e.year === yearFilter);
+
+  return (
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 24px", fontFamily: F.sans, backgroundColor: C.bg, minHeight: "100vh" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono&display=swap');
+        @keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        * { margin:0; padding:0; box-sizing:border-box; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ padding: "40px 0 24px", textAlign: "center" }}>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Archives</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 6 }}>Past Editions</h2>
+        <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>47 weeks of your life, published</p>
+      </div>
+
+      {/* Controls bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, padding: "12px 0", marginBottom: 32 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", gap: 0 }}>
+            {["2026", "2025"].map((y) => (
+              <button key={y} onClick={() => setYearFilter(y)} style={{
+                fontFamily: F.sans, fontSize: 11, fontWeight: yearFilter === y ? 500 : 400,
+                color: yearFilter === y ? C.bg : C.inkMuted,
+                backgroundColor: yearFilter === y ? C.ink : "transparent",
+                border: `1px solid ${yearFilter === y ? C.ink : C.rule}`,
+                padding: "5px 16px", cursor: "pointer", marginLeft: y === "2025" ? -1 : 0,
+              }}>{y}</button>
+            ))}
+          </div>
+          <button style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+            color: C.bg, backgroundColor: C.ink,
+            border: "none", padding: "6px 14px", cursor: "pointer",
+          }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/>
+            </svg>
+            Create Edition
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => setViewMode("list")} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "list" ? C.ink : C.rule}`,
+            opacity: viewMode === "list" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <line x1="1" y1="3" x2="15" y2="3"/><line x1="1" y1="8" x2="15" y2="8"/><line x1="1" y1="13" x2="15" y2="13"/>
+            </svg>
+          </button>
+          <button onClick={() => setViewMode("grid")} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "grid" ? C.ink : C.rule}`,
+            opacity: viewMode === "grid" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/>
+              <rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* ===== LIST VIEW ===== */}
+      {viewMode === "list" && (
+        <div>
+          {filtered.map((ed, i) => (
+            <div key={i} style={{
+              display: "grid", gridTemplateColumns: "80px 1fr", gap: 24,
+              padding: "24px 0", borderBottom: `1px solid ${C.rule}`,
+              cursor: "pointer", animation: `fadeInUp 0.4s ease ${i * 0.04}s both`,
+              transition: "background-color 0.15s",
+            }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = C.sectionBg}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+            >
+              <div style={{ textAlign: "right", paddingRight: 8, borderRight: `2px solid ${C.rule}` }}>
+                <div style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{ed.num}</div>
+                <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted, marginTop: 4 }}>{ed.week}</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>{ed.topSection}</div>
+                <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.25, color: C.ink, marginBottom: 8 }}>{ed.headline}</h3>
+                <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", lineHeight: 1.6, color: C.inkMuted, marginBottom: 10 }}>{ed.edNote}</p>
+                <div style={{ display: "flex", gap: 12, fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+                  <span>{ed.entries} entries</span>
+                  <span>{ed.words.toLocaleString()} words</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ===== GRID VIEW ===== */}
+      {viewMode === "grid" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }}>
+          {filtered.map((ed, i) => (
+            <div key={i} style={{
+              cursor: "pointer", transition: "transform 0.2s",
+              animation: `fadeInUp 0.4s ease ${i * 0.05}s both`,
+            }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-4px)"}
+              onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
+            >
+              <div style={{
+                height: 200, overflow: "hidden",
+                border: `1px solid ${C.rule}`, borderBottom: "none", position: "relative",
+              }}>
+                <img src={ed.coverPhoto} alt="" style={{
+                  width: "100%", height: "100%", objectFit: "cover",
+                  display: "block", filter: "grayscale(30%)",
+                }} />
+                <div style={{
+                  position: "absolute", bottom: 0, left: 0, right: 0, height: "60%",
+                  background: "linear-gradient(transparent, rgba(0,0,0,0.65))",
+                }} />
+                <div style={{
+                  position: "absolute", top: 12, left: 14,
+                  fontFamily: F.sans, fontSize: 9, fontWeight: 600,
+                  color: "#fff", textTransform: "uppercase", letterSpacing: "1.5px", opacity: 0.85,
+                }}>Vol. I · No. {ed.num}</div>
+                <div style={{
+                  position: "absolute", bottom: 12, left: 14,
+                  fontFamily: F.sans, fontSize: 10, color: "#fff", opacity: 0.75,
+                }}>{ed.week}, {ed.year}</div>
+              </div>
+              <div style={{
+                border: `1px solid ${C.rule}`, borderTop: `2px solid ${C.ink}`,
+                padding: "14px 14px 16px",
+              }}>
+                <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>{ed.topSection}</div>
+                <h3 style={{
+                  fontFamily: F.display, fontSize: 16, fontWeight: 700,
+                  lineHeight: 1.3, color: C.ink, marginBottom: 8, minHeight: 42,
+                }}>{ed.headline}</h3>
+                <div style={{ display: "flex", justifyContent: "space-between", fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+                  <span>{ed.entries} entries</span>
+                  <span>{ed.words.toLocaleString()} words</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ height: 60 }} />
+    </div>
+  );
+}

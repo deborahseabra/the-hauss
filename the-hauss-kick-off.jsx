@@ -622,7 +622,7 @@ function JournalView({ C, data, onSwitchToEdition, onNewEntry }) {
     <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
       {/* Journal header */}
       <div style={{ padding: "40px 0 24px", textAlign: "center" }}>
-        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>My Journal</div>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Notebook</div>
         <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 6 }}>This Week</h2>
         <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 20 }}>
           {data.journal.length} days · {data.journal.reduce((a, d) => a + d.entries.length, 0)} entries
@@ -1361,7 +1361,7 @@ export default function App() {
           backgroundColor: C.bg, transition: "background-color 0.4s ease",
         }}>
           {[
-            { key: "journal", label: "My Journal" },
+            { key: "journal", label: "Notebook" },
             { key: "edition", label: "Last Edition" },
             { key: "archives", label: "Archives" },
             { key: "sections", label: "Sections" },

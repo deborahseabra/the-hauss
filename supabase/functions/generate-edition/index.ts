@@ -136,6 +136,26 @@ async function callOpenAI(prompt: {
   return JSON.parse(content);
 }
 
+async function fetchCityWeather(city: string): Promise<{ temperature: number | null }> {
+  try {
+    const geoRes = await fetch(
+      `https://photon.komoot.io/api/?q=${encodeURIComponent(city)}&limit=1`,
+    );
+    const geoData = await geoRes.json();
+    const coords = geoData?.features?.[0]?.geometry?.coordinates;
+    if (!coords) return { temperature: null };
+    const [lng, lat] = coords;
+    const weatherRes = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`,
+    );
+    const weatherData = await weatherRes.json();
+    const temp = weatherData?.current_weather?.temperature;
+    return { temperature: typeof temp === "number" ? temp : null };
+  } catch {
+    return { temperature: null };
+  }
+}
+
 async function generateForUser(
   supabase: ReturnType<typeof createClient>,
   userId: string,
@@ -227,6 +247,17 @@ async function generateForUser(
 
   const editorialEncrypted = await encryptText(editorialBody);
 
+  const { data: userProfile } = await supabase
+    .from("profiles")
+    .select("city")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const pubCity = userProfile?.city || null;
+  const { temperature: pubTemp } = pubCity
+    ? await fetchCityWeather(pubCity)
+    : { temperature: null };
+
   const { data: upserted, error: upsertErr } = await supabase
     .from("editions")
     .upsert({
@@ -238,6 +269,8 @@ async function generateForUser(
       entry_count: entryCount,
       word_count: wordCount,
       editorial_encrypted: editorialEncrypted,
+      publication_city: pubCity,
+      publication_temperature: pubTemp,
     }, { onConflict: "user_id,week_start" })
     .select("id, user_id, week_start, number")
     .single();

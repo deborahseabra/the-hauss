@@ -34,7 +34,7 @@ CREATE TABLE profiles (
   avatar_url      TEXT,
   plan            TEXT NOT NULL DEFAULT 'free'
                     CHECK (plan IN ('free', 'pro', 'team')),
-  publication_name TEXT NOT NULL DEFAULT 'My Journal',
+  publication_name TEXT NOT NULL DEFAULT 'Notebook',
   motto           TEXT NOT NULL DEFAULT 'All the life that''s fit to print',
   theme_mode      TEXT NOT NULL DEFAULT 'light'
                     CHECK (theme_mode IN ('light', 'dark')),

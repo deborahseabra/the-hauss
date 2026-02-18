@@ -28,7 +28,7 @@ It's not a diary. It's your personal newsroom.
 
 ### Views
 
-**My Journal** — A chronological, day-by-day view of your entries. Intimate and personal. Each entry shows timestamp, mood, section tag, source (App or Telegram), and visibility status.
+**Notebook** — A chronological, day-by-day view of your entries. Intimate and personal. Each entry shows timestamp, mood, section tag, source (App or Telegram), and visibility status.
 
 **Last Edition** — Your weekly newspaper. Features a masthead with your publication name and motto, a live ticker, top stories with headlines and excerpts, "The Week at a Glance" briefing, an AI editor's note, section index, and stats bar.
 

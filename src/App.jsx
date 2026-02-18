@@ -5,7 +5,6 @@ import LandingPage from "./LandingPage";
 import {
   fetchProfile,
   fetchJournal,
-  fetchLatestEdition,
   fetchEditionByOffset,
   fetchEditionById,
   fetchAllEditions,
@@ -25,8 +24,13 @@ import {
   fetchPublicProfile,
   fetchPublicEdition,
   updateEditionSharing,
+  fetchUserEntriesForBuilder,
+  createCustomEdition,
+  fetchEditionLinks,
+  fetchCityWeather,
 } from "./lib/api";
 import { hasAccess, ROLE_LABELS, ROLE_BADGE_STYLES } from "./lib/access";
+import CityField from "./components/CityField";
 
 const PALETTES = {
   red: { primary: "#c41e1e", light: "#e85d5d", bg: "#fef5f5", bgDark: "#2a1818" },
@@ -759,12 +763,13 @@ Your AI editor can proofread this or transform it into a polished editorial piec
 // ============================================================
 // SETTINGS
 // ============================================================
-function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, pubName, setPubName, motto, setMotto, userId }) {
+function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, pubName, setPubName, motto, setMotto, city, setCity, userId }) {
   const [ln, setLn] = useState(pubName);
   const [lm, setLm] = useState(motto);
+  const [lc, setLc] = useState(city);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
-  useEffect(() => { setLn(pubName); setLm(motto); }, [pubName, motto]);
+  useEffect(() => { setLn(pubName); setLm(motto); setLc(city); }, [pubName, motto, city]);
   if (!isOpen) return null;
 
   const save = async () => {
@@ -774,11 +779,13 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
       await updateProfile(userId, {
         publication_name: ln,
         motto: lm,
+        city: lc,
         theme_mode: mode,
         theme_accent: accent,
       });
       setPubName(ln);
       setMotto(lm);
+      setCity(lc);
       setToast("success");
       setTimeout(() => {
         setToast(null);
@@ -807,10 +814,13 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
           <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Appearance</div>
           <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 10 }}>Theme</div>
           <div style={{ display: "flex", gap: 0, marginBottom: 24 }}>
-            {[{ k: "light", l: "Light", i: "☀️" }, { k: "dark", l: "Dark", i: "🌙" }].map((t) => (
-              <button key={t.k} onClick={() => setMode(t.k)} style={{ flex: 1, padding: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, backgroundColor: mode === t.k ? C.sectionBg : "transparent", border: mode === t.k ? `1.5px solid ${C.ink}` : `1px solid ${C.rule}`, cursor: "pointer", marginLeft: t.k === "dark" ? -1 : 0 }}>
-                <span style={{ fontSize: 20 }}>{t.i}</span>
-                <span style={{ fontFamily: F.sans, fontSize: 11, fontWeight: mode === t.k ? 500 : 400, color: mode === t.k ? C.ink : C.inkMuted }}>{t.l}</span>
+            {[
+              { k: "light", l: "Light", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg> },
+              { k: "dark", l: "Dark", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg> },
+            ].map((t) => (
+              <button key={t.k} onClick={() => setMode(t.k)} style={{ flex: 1, padding: "8px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, backgroundColor: mode === t.k ? C.sectionBg : "transparent", border: mode === t.k ? `1.5px solid ${C.ink}` : `1px solid ${C.rule}`, cursor: "pointer", marginLeft: t.k === "dark" ? -1 : 0, color: mode === t.k ? C.ink : C.inkMuted }}>
+                {t.icon}
+                <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: mode === t.k ? 500 : 400, color: mode === t.k ? C.ink : C.inkMuted }}>{t.l}</span>
               </button>
             ))}
           </div>
@@ -841,10 +851,10 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
           <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Plan</div>
           <div style={{ border: `1px solid ${C.rule}`, padding: 20 }}>
             <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink }}>Free <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, border: `1px solid ${C.accent}`, padding: "2px 8px", marginLeft: 8, textTransform: "uppercase" }}>Current</span></div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, marginTop: 4 }}>30 entries/month · Basic AI</div>
+            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, marginTop: 4 }}>30 entries/month · Basic editing</div>
             <div style={{ height: 1, backgroundColor: C.rule, margin: "12px 0" }} />
-            <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink, marginBottom: 6 }}>Premium</div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, lineHeight: 1.6, marginBottom: 16 }}>Unlimited entries · Advanced AI · Compiled editions · PDF export · Public page</div>
+            <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink, marginBottom: 6 }}>Premium</div>
+            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkMuted, lineHeight: 1.6, marginBottom: 16 }}>Unlimited entries · Advanced editing · Compiled editions · PDF export · Public page</div>
             <button style={{ width: "100%", padding: 10, fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", cursor: "pointer" }}>Upgrade — $9/mo</button>
           </div>
         </div>
@@ -856,9 +866,21 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, p
             <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Name</div>
             <input value={ln} onChange={(e) => setLn(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontFamily: F.display, fontSize: 14, color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
           </div>
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 14 }}>
             <div style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, marginBottom: 6 }}>Motto</div>
             <input value={lm} onChange={(e) => setLm(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none" }} />
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <CityField
+              label="City"
+              value={lc}
+              onChange={setLc}
+              placeholder="Where do you write from?"
+              style={{ marginBottom: 0 }}
+              labelStyle={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.ink, textTransform: "none", letterSpacing: "normal" }}
+              inputStyle={{ padding: "8px 12px", fontFamily: F.body, fontSize: 13, backgroundColor: C.sectionBg }}
+              colors={{ ink: C.ink, inkMuted: C.inkMuted, rule: C.rule, bg: C.sectionBg, sectionBg: C.sectionBg }}
+            />
           </div>
           {toast === "success" && (
             <div style={{
@@ -1071,7 +1093,7 @@ function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, on
     <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
       {/* Journal header */}
       <div style={{ padding: "40px 0 24px", textAlign: "center" }}>
-        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>My Journal</div>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Notebook</div>
 
         {/* Period selector — title + calendar icon to the right */}
         <div style={{ position: "relative" }} ref={pickerRef}>
@@ -1261,79 +1283,853 @@ function JournalView({ C, userId, onSwitchToEdition, onNewEntry, dataVersion, on
 }
 
 // ============================================================
+// EDITION BUILDER — Publisher creates custom editions
+// ============================================================
+function EditionBuilder({ C, userId, session, onClose, onCreated }) {
+  const [step, setStep] = useState(1); // 1=setup, 2=select entries, 3=arrange, 4=links, 5=preview/publish
+  const [title, setTitle] = useState("");
+  const [weekStart, setWeekStart] = useState(new Date().toISOString().slice(0, 10));
+  const [weekEnd, setWeekEnd] = useState(new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10));
+  const [allEntries, setAllEntries] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [featuredIds, setFeaturedIds] = useState([]);
+  const [weekAtGlance, setWeekAtGlance] = useState([{ label: "Mon", text: "", url: "" }]);
+  const [editorial, setEditorial] = useState("");
+  const [links, setLinks] = useState([]);
+  const [loadingEntries, setLoadingEntries] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState("all");
+  const [dragIdx, setDragIdx] = useState(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    setLoadingEntries(true);
+    fetchUserEntriesForBuilder(userId)
+      .then(setAllEntries)
+      .catch(console.error)
+      .finally(() => setLoadingEntries(false));
+  }, [userId]);
+
+  const selectedEntries = selectedIds.map((id) => allEntries.find((e) => e.id === id)).filter(Boolean);
+
+  const filteredEntries = sectionFilter === "all"
+    ? allEntries
+    : allEntries.filter((e) => e.section === sectionFilter);
+
+  const toggleEntry = (id) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const toggleFeatured = (id) => {
+    setFeaturedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1], id];
+      return [...prev, id];
+    });
+  };
+
+  const handleDragStart = (idx) => setDragIdx(idx);
+  const handleDragOver = (e) => e.preventDefault();
+  const handleDrop = (targetIdx) => {
+    if (dragIdx === null || dragIdx === targetIdx) return;
+    setSelectedIds((prev) => {
+      const arr = [...prev];
+      const [moved] = arr.splice(dragIdx, 1);
+      arr.splice(targetIdx, 0, moved);
+      return arr;
+    });
+    setDragIdx(null);
+  };
+
+  const addGlanceItem = () => setWeekAtGlance((prev) => [...prev, { label: "", text: "", url: "" }]);
+  const removeGlanceItem = (idx) => setWeekAtGlance((prev) => prev.filter((_, i) => i !== idx));
+  const updateGlanceItem = (idx, field, value) => {
+    setWeekAtGlance((prev) => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  };
+
+  const addLink = () => setLinks((prev) => [...prev, { title: "", url: "", description: "", type: "read" }]);
+  const removeLink = (idx) => setLinks((prev) => prev.filter((_, i) => i !== idx));
+  const updateLink = (idx, field, value) => {
+    setLinks((prev) => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  };
+
+  const handleGenerateAI = async () => {
+    if (!session || selectedEntries.length === 0) return;
+    setGeneratingAI(true);
+    try {
+      const entrySummaries = selectedEntries.map((e) =>
+        `[${e.section.toUpperCase()}] ${e.title}\n${e.body.slice(0, 300)}`
+      ).join("\n\n---\n\n");
+
+      const prompt = `You are an editorial writer for a personal newspaper. Summarize the following ${selectedEntries.length} entries into a cohesive Editor's Note (2-3 paragraphs). Write in a warm, literary style — like the editor of a small independent newspaper reflecting on the week. Do not use bullet points. Return JSON: {"editorial": "your text here"}`;
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/ai-editor`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          text: entrySummaries,
+          mode: "rewrite",
+          tone: "literary",
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.body || data.editorial || data.result || "";
+        if (text) setEditorial(text);
+      }
+    } catch (err) {
+      console.error("AI editorial generation failed:", err);
+    }
+    setGeneratingAI(false);
+  };
+
+  const handlePublish = async () => {
+    if (selectedIds.length === 0 || publishing) return;
+    setPublishing(true);
+    try {
+      const glanceData = weekAtGlance.filter((g) => g.text.trim());
+      const linkData = links.filter((l) => l.title.trim() && l.url.trim());
+
+      await createCustomEdition(userId, {
+        title: title || null,
+        weekStart,
+        weekEnd,
+        entryIds: selectedIds,
+        featuredIds,
+        weekAtGlance: glanceData.length > 0 ? glanceData : null,
+        editorialText: editorial || null,
+        links: linkData,
+        isPublic: false,
+        shareMode: "full",
+      });
+      if (onCreated) onCreated();
+      onClose();
+    } catch (err) {
+      console.error("Failed to create custom edition:", err);
+      alert("Failed to create edition: " + (err.message || "Unknown error"));
+    }
+    setPublishing(false);
+  };
+
+  const LINK_TYPES = [
+    { value: "read", label: "Read", icon: "📖" },
+    { value: "watch", label: "Watch", icon: "🎬" },
+    { value: "listen", label: "Listen", icon: "🎧" },
+    { value: "visit", label: "Visit", icon: "📍" },
+  ];
+
+  const sectionOptions = ["all", "dispatch", "essay", "letter", "review", "photo"];
+  const sectionLabels = { all: "All", dispatch: "Dispatch", essay: "Essay", letter: "Letter", review: "Review", photo: "Photo" };
+
+  return (
+    <div style={{
+      position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 2000,
+      backgroundColor: C.bg, overflow: "auto", animation: "editorSlideIn 0.3s ease",
+    }}>
+      {/* Header */}
+      <div style={{
+        position: "sticky", top: 0, zIndex: 10, backgroundColor: C.bg,
+        borderBottom: `1px solid ${C.rule}`, padding: "0 24px", height: 56,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <button onClick={onClose} style={{
+          fontFamily: F.sans, fontSize: 13, color: C.inkMuted, background: "none",
+          border: "none", cursor: "pointer",
+        }}>← Cancel</button>
+        <span style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, color: C.ink }}>
+          New Edition {step > 1 && `· Step ${step}/5`}
+        </span>
+        <div style={{ width: 80 }} />
+      </div>
+
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
+
+        {/* STEP 1: Setup */}
+        {step === 1 && (
+          <div style={{ maxWidth: 500, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 8 }}>Create Your Edition</h2>
+            <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 32 }}>
+              Curate your own newspaper edition — select entries, add recommendations, and publish.
+            </p>
+
+            <label style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>
+              Edition Title (optional)
+            </label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. My Month in Lisbon, Q1 2026..."
+              style={{
+                width: "100%", padding: "10px 12px", fontFamily: F.body, fontSize: 15,
+                border: `1px solid ${C.rule}`, backgroundColor: C.bg, color: C.ink,
+                outline: "none", marginBottom: 24, boxSizing: "border-box",
+              }}
+            />
+
+            <div style={{ display: "flex", gap: 16, marginBottom: 32 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={weekStart}
+                  onChange={(e) => setWeekStart(e.target.value)}
+                  style={{
+                    width: "100%", padding: "10px 12px", fontFamily: F.sans, fontSize: 13,
+                    border: `1px solid ${C.rule}`, backgroundColor: C.bg, color: C.ink,
+                    outline: "none", boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={weekEnd}
+                  onChange={(e) => setWeekEnd(e.target.value)}
+                  style={{
+                    width: "100%", padding: "10px 12px", fontFamily: F.sans, fontSize: 13,
+                    border: `1px solid ${C.rule}`, backgroundColor: C.bg, color: C.ink,
+                    outline: "none", boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            </div>
+
+            <button onClick={() => setStep(2)} style={{
+              fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.bg,
+              backgroundColor: C.ink, border: "none", padding: "12px 32px",
+              cursor: "pointer", width: "100%",
+            }}>Continue — Select Entries</button>
+          </div>
+        )}
+
+        {/* STEP 2: Select Entries */}
+        {step === 2 && (
+          <div style={{ animation: "fadeIn 0.3s ease" }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Select Entries</h2>
+            <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 20 }}>
+              Choose at least one entry for your edition. {selectedIds.length} selected.
+            </p>
+
+            {/* Section filter */}
+            <div style={{ display: "flex", gap: 0, marginBottom: 20 }}>
+              {sectionOptions.map((s) => (
+                <button key={s} onClick={() => setSectionFilter(s)} style={{
+                  fontFamily: F.sans, fontSize: 10, fontWeight: sectionFilter === s ? 500 : 400,
+                  color: sectionFilter === s ? C.bg : C.inkMuted,
+                  backgroundColor: sectionFilter === s ? C.ink : "transparent",
+                  border: `1px solid ${sectionFilter === s ? C.ink : C.rule}`,
+                  padding: "5px 14px", cursor: "pointer", marginLeft: s !== "all" ? -1 : 0,
+                }}>{sectionLabels[s]}</button>
+              ))}
+            </div>
+
+            {loadingEntries && <LoadingBlock C={C} text="Loading entries..." />}
+
+            <div style={{ maxHeight: 450, overflowY: "auto", border: `1px solid ${C.rule}`, marginBottom: 20 }}>
+              {filteredEntries.map((e) => {
+                const selected = selectedIds.includes(e.id);
+                return (
+                  <div
+                    key={e.id}
+                    onClick={() => toggleEntry(e.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
+                      borderBottom: `1px solid ${C.rule}`, cursor: "pointer",
+                      backgroundColor: selected ? (C.sectionBg || "#f7f7f7") : "transparent",
+                    }}
+                  >
+                    <div style={{
+                      width: 20, height: 20, borderRadius: 3,
+                      border: `2px solid ${selected ? C.accent : C.rule}`,
+                      backgroundColor: selected ? C.accent : "transparent",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      flexShrink: 0,
+                    }}>
+                      {selected && <span style={{ color: "#fff", fontSize: 12, lineHeight: 1 }}>✓</span>}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 2 }}>
+                        {SECTION_UPPER_MAP[e.section] || e.section.toUpperCase()}
+                      </div>
+                      <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {e.title}
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted, flexShrink: 0 }}>
+                      {e.date} · {e.readTime}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <button onClick={() => setStep(1)} style={{
+                fontFamily: F.sans, fontSize: 12, color: C.inkMuted, background: "none",
+                border: `1px solid ${C.rule}`, padding: "10px 24px", cursor: "pointer",
+              }}>← Back</button>
+              <button
+                onClick={() => selectedIds.length > 0 && setStep(3)}
+                disabled={selectedIds.length === 0}
+                style={{
+                  fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.bg,
+                  backgroundColor: selectedIds.length > 0 ? C.ink : C.rule,
+                  border: "none", padding: "10px 32px",
+                  cursor: selectedIds.length > 0 ? "pointer" : "default",
+                }}
+              >Continue — Arrange Layout ({selectedIds.length})</button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: Arrange Layout (drag-and-drop) */}
+        {step === 3 && (
+          <div style={{ animation: "fadeIn 0.3s ease" }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Arrange Your Edition</h2>
+            <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>
+              Drag to reorder. First 2 entries appear as top stories. Star up to 2 as featured.
+            </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 340px", gap: 0, marginBottom: 24 }}>
+              {/* Left: entry ordering */}
+              <div style={{ paddingRight: 24 }}>
+                <h3 style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: C.inkMuted, marginBottom: 12 }}>
+                  Story Order
+                </h3>
+                {selectedEntries.map((e, idx) => (
+                  <div
+                    key={e.id}
+                    draggable
+                    onDragStart={() => handleDragStart(idx)}
+                    onDragOver={handleDragOver}
+                    onDrop={() => handleDrop(idx)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                      border: `1px solid ${dragIdx === idx ? C.accent : C.rule}`,
+                      marginBottom: 6, backgroundColor: C.bg, cursor: "grab",
+                      opacity: dragIdx === idx ? 0.5 : 1,
+                    }}
+                  >
+                    <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted, width: 18, textAlign: "center" }}>⠿</span>
+                    <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: idx < 2 ? C.accent : C.inkMuted, width: 20, flexShrink: 0 }}>
+                      {idx < 2 ? "TOP" : `#${idx + 1}`}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: F.display, fontSize: 14, fontWeight: 600, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.title}</div>
+                      <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{SECTION_UPPER_MAP[e.section] || e.section} · {e.readTime}</div>
+                    </div>
+                    <button
+                      onClick={(ev) => { ev.stopPropagation(); toggleFeatured(e.id); }}
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", fontSize: 16,
+                        color: featuredIds.includes(e.id) ? "#b8860b" : C.rule,
+                      }}
+                      title={featuredIds.includes(e.id) ? "Unstar" : "Star as featured"}
+                    >★</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ backgroundColor: C.rule }} />
+              {/* Right: sidebar editing */}
+              <div style={{ paddingLeft: 24 }}>
+                {/* Week at a Glance */}
+                <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink, marginBottom: 4 }}>The Week at a Glance</h3>
+                <p style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginBottom: 12 }}>
+                  Recommend things to read, watch, listen, visit.
+                </p>
+                {weekAtGlance.map((item, idx) => (
+                  <div key={idx} style={{ marginBottom: 10, padding: "8px 10px", border: `1px solid ${C.rule}`, backgroundColor: C.sectionBg || "#f7f7f7" }}>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                      <input
+                        value={item.label}
+                        onChange={(e) => updateGlanceItem(idx, "label", e.target.value)}
+                        placeholder="Label (e.g. Mon, Read, Watch)"
+                        style={{
+                          width: 80, padding: "4px 6px", fontFamily: F.sans, fontSize: 11,
+                          fontWeight: 600, border: `1px solid ${C.rule}`, backgroundColor: C.bg,
+                          color: C.ink, outline: "none",
+                        }}
+                      />
+                      <button onClick={() => removeGlanceItem(idx)} style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+                      }}>✕</button>
+                    </div>
+                    <input
+                      value={item.text}
+                      onChange={(e) => updateGlanceItem(idx, "text", e.target.value)}
+                      placeholder="Description or recommendation"
+                      style={{
+                        width: "100%", padding: "4px 6px", fontFamily: F.body, fontSize: 12,
+                        border: `1px solid ${C.rule}`, backgroundColor: C.bg, color: C.ink,
+                        outline: "none", marginBottom: 4, boxSizing: "border-box",
+                      }}
+                    />
+                    <input
+                      value={item.url || ""}
+                      onChange={(e) => updateGlanceItem(idx, "url", e.target.value)}
+                      placeholder="Link (optional)"
+                      style={{
+                        width: "100%", padding: "4px 6px", fontFamily: F.sans, fontSize: 10,
+                        border: `1px solid ${C.rule}`, backgroundColor: C.bg, color: C.inkMuted,
+                        outline: "none", boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                ))}
+                <button onClick={addGlanceItem} style={{
+                  fontFamily: F.sans, fontSize: 11, color: C.accent, background: "none",
+                  border: "none", cursor: "pointer", marginBottom: 20,
+                }}>+ Add item</button>
+
+                {/* Editor's Note */}
+                <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink, marginBottom: 4, marginTop: 8 }}>Editor's Note</h3>
+                <p style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>
+                  Write your own or let AI summarize.
+                </p>
+                <textarea
+                  value={editorial}
+                  onChange={(e) => setEditorial(e.target.value)}
+                  placeholder="Your editorial note for this edition..."
+                  rows={5}
+                  style={{
+                    width: "100%", padding: "8px 10px", fontFamily: F.body, fontSize: 13,
+                    lineHeight: 1.6, border: `1px solid ${C.rule}`, backgroundColor: C.bg,
+                    color: C.ink, outline: "none", resize: "vertical", boxSizing: "border-box",
+                    marginBottom: 8,
+                  }}
+                />
+                <button
+                  onClick={handleGenerateAI}
+                  disabled={generatingAI || selectedEntries.length === 0}
+                  style={{
+                    fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                    color: generatingAI ? C.inkMuted : C.accent,
+                    background: "none", border: `1px solid ${generatingAI ? C.rule : C.accent}`,
+                    padding: "6px 14px", cursor: generatingAI ? "default" : "pointer",
+                  }}
+                >{generatingAI ? "Generating..." : "✦ Generate with AI"}</button>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <button onClick={() => setStep(2)} style={{
+                fontFamily: F.sans, fontSize: 12, color: C.inkMuted, background: "none",
+                border: `1px solid ${C.rule}`, padding: "10px 24px", cursor: "pointer",
+              }}>← Back</button>
+              <button onClick={() => setStep(4)} style={{
+                fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.bg,
+                backgroundColor: C.ink, border: "none", padding: "10px 32px", cursor: "pointer",
+              }}>Continue — Add Links</button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 4: External Links */}
+        {step === 4 && (
+          <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 4 }}>External Recommendations</h2>
+            <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 20 }}>
+              Add links to articles, films, music, or places. These appear in "Also in This Edition."
+            </p>
+
+            {links.map((link, idx) => (
+              <div key={idx} style={{ border: `1px solid ${C.rule}`, padding: 16, marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {LINK_TYPES.map((lt) => (
+                      <button key={lt.value} onClick={() => updateLink(idx, "type", lt.value)} style={{
+                        fontFamily: F.sans, fontSize: 10,
+                        color: link.type === lt.value ? C.bg : C.inkMuted,
+                        backgroundColor: link.type === lt.value ? C.ink : "transparent",
+                        border: `1px solid ${link.type === lt.value ? C.ink : C.rule}`,
+                        padding: "3px 10px", cursor: "pointer",
+                      }}>{lt.icon} {lt.label}</button>
+                    ))}
+                  </div>
+                  <button onClick={() => removeLink(idx)} style={{
+                    background: "none", border: "none", fontFamily: F.sans,
+                    fontSize: 11, color: C.inkMuted, cursor: "pointer",
+                  }}>✕ Remove</button>
+                </div>
+                <input
+                  value={link.title}
+                  onChange={(e) => updateLink(idx, "title", e.target.value)}
+                  placeholder="Title"
+                  style={{
+                    width: "100%", padding: "8px 10px", fontFamily: F.display, fontSize: 15,
+                    fontWeight: 600, border: `1px solid ${C.rule}`, backgroundColor: C.bg,
+                    color: C.ink, outline: "none", marginBottom: 8, boxSizing: "border-box",
+                  }}
+                />
+                <input
+                  value={link.url}
+                  onChange={(e) => updateLink(idx, "url", e.target.value)}
+                  placeholder="URL (https://...)"
+                  style={{
+                    width: "100%", padding: "6px 10px", fontFamily: F.sans, fontSize: 12,
+                    border: `1px solid ${C.rule}`, backgroundColor: C.bg, color: C.ink,
+                    outline: "none", marginBottom: 8, boxSizing: "border-box",
+                  }}
+                />
+                <input
+                  value={link.description}
+                  onChange={(e) => updateLink(idx, "description", e.target.value)}
+                  placeholder="Short description (optional)"
+                  style={{
+                    width: "100%", padding: "6px 10px", fontFamily: F.body, fontSize: 12,
+                    fontStyle: "italic", border: `1px solid ${C.rule}`, backgroundColor: C.bg,
+                    color: C.inkMuted, outline: "none", boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            ))}
+
+            <button onClick={addLink} style={{
+              fontFamily: F.sans, fontSize: 12, color: C.accent, background: "none",
+              border: `1px dashed ${C.accent}`, padding: "10px 20px", cursor: "pointer",
+              width: "100%", marginBottom: 24,
+            }}>+ Add Recommendation</button>
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <button onClick={() => setStep(3)} style={{
+                fontFamily: F.sans, fontSize: 12, color: C.inkMuted, background: "none",
+                border: `1px solid ${C.rule}`, padding: "10px 24px", cursor: "pointer",
+              }}>← Back</button>
+              <button onClick={() => setStep(5)} style={{
+                fontFamily: F.sans, fontSize: 13, fontWeight: 500, color: C.bg,
+                backgroundColor: C.ink, border: "none", padding: "10px 32px", cursor: "pointer",
+              }}>Continue — Preview</button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 5: Preview & Publish */}
+        {step === 5 && (
+          <div style={{ animation: "fadeIn 0.3s ease" }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Preview & Publish</h2>
+            <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 24 }}>
+              Review your edition before publishing.
+            </p>
+
+            {/* Mini preview */}
+            <div style={{ border: `2px solid ${C.ink}`, padding: 24, marginBottom: 24 }}>
+              <div style={{ textAlign: "center", marginBottom: 16 }}>
+                <div style={{ width: "100%", height: 2, backgroundColor: C.ink }} />
+                <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, margin: "8px 0", color: C.ink }}>
+                  {title || "Your Custom Edition"}
+                </h1>
+                <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>
+                  {weekStart} — {weekEnd}
+                </div>
+                <div style={{ width: "100%", height: 2, backgroundColor: C.ink }} />
+              </div>
+
+              <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, textAlign: "center", marginBottom: 16 }}>
+                {selectedIds.length} entries · {selectedEntries.reduce((s, e) => s + (e.word_count || 0), 0).toLocaleString()} words
+                {links.filter((l) => l.title && l.url).length > 0 && ` · ${links.filter((l) => l.title && l.url).length} recommendations`}
+              </div>
+
+              {/* Top stories preview */}
+              {selectedEntries.slice(0, 2).map((e, idx) => (
+                <div key={e.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: idx < 1 && selectedEntries.length > 1 ? `1px solid ${C.rule}` : "none" }}>
+                  <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 4 }}>
+                    {SECTION_UPPER_MAP[e.section] || e.section.toUpperCase()}
+                    {featuredIds.includes(e.id) && <span style={{ color: "#b8860b", marginLeft: 8 }}>★ Featured</span>}
+                  </div>
+                  <div style={{ fontFamily: F.display, fontSize: idx === 0 ? 22 : 18, fontWeight: 700, color: C.ink, lineHeight: 1.2, marginBottom: 4 }}>{e.title}</div>
+                  <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{e.readTime} · {e.date}</div>
+                </div>
+              ))}
+
+              {/* More stories preview */}
+              {selectedEntries.length > 2 && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.ink}` }}>
+                  <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: C.inkMuted, marginBottom: 10 }}>Also in This Edition</div>
+                  <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(selectedEntries.length - 2, 3)}, 1fr)`, gap: 12 }}>
+                    {selectedEntries.slice(2).map((e) => (
+                      <div key={e.id}>
+                        <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.accent, textTransform: "uppercase" }}>{SECTION_UPPER_MAP[e.section] || e.section}</div>
+                        <div style={{ fontFamily: F.display, fontSize: 13, fontWeight: 600, color: C.ink, lineHeight: 1.25 }}>{e.title}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Link preview */}
+              {links.filter((l) => l.title && l.url).length > 0 && (
+                <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.rule}` }}>
+                  <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: C.inkMuted, marginBottom: 10 }}>Recommendations</div>
+                  {links.filter((l) => l.title && l.url).map((l, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <span style={{ fontSize: 14 }}>{LINK_TYPES.find((lt) => lt.value === l.type)?.icon || "📖"}</span>
+                      <div>
+                        <div style={{ fontFamily: F.display, fontSize: 13, fontWeight: 600, color: C.ink }}>{l.title}</div>
+                        {l.description && <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted }}>{l.description}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {editorial && (
+                <div style={{ marginTop: 16, padding: 16, backgroundColor: C.sectionBg || "#f7f7f7" }}>
+                  <div style={{ fontFamily: F.display, fontSize: 14, color: C.accent, marginBottom: 6 }}>✦ Editor's Note</div>
+                  <p style={{ fontFamily: F.body, fontSize: 12, lineHeight: 1.6, color: C.inkLight }}>{editorial}</p>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <button onClick={() => setStep(4)} style={{
+                fontFamily: F.sans, fontSize: 12, color: C.inkMuted, background: "none",
+                border: `1px solid ${C.rule}`, padding: "10px 24px", cursor: "pointer",
+              }}>← Back</button>
+              <button
+                onClick={handlePublish}
+                disabled={publishing}
+                style={{
+                  fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: "#fff",
+                  backgroundColor: C.accent, border: "none", padding: "12px 40px",
+                  cursor: publishing ? "default" : "pointer",
+                  opacity: publishing ? 0.7 : 1,
+                }}
+              >{publishing ? "Publishing..." : "Publish Edition"}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const SECTION_UPPER_MAP = {
+  dispatch: "DISPATCH",
+  essay: "PERSONAL ESSAY",
+  letter: "LETTER TO SELF",
+  review: "REVIEW",
+  photo: "PHOTO ESSAY",
+};
+
+// ============================================================
 // ARCHIVES VIEW — Past editions as a grid of "covers"
 // ============================================================
-function ArchivesView({ C, userId, onSelectEdition, onSwitchToEdition }) {
+function ArchivesView({ C, userId, user, session, onSelectEdition, onSwitchToEdition, onRefresh }) {
   const [editions, setEditions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [viewMode, setViewMode] = useState("list");
+  const [yearFilter, setYearFilter] = useState(null);
+
+  const isPublisher = hasAccess(user?.role || "reader", user?.isTester || false, "publisher");
 
   useEffect(() => {
     if (!userId) return;
     fetchAllEditions(userId)
-      .then(setEditions)
+      .then((eds) => {
+        setEditions(eds);
+        if (eds.length > 0 && !yearFilter) setYearFilter(eds[0].year);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [userId]);
 
+  const handleEditionCreated = () => {
+    fetchAllEditions(userId).then(setEditions).catch(console.error);
+    if (onRefresh) onRefresh();
+  };
+
+  const openEdition = (ed) => {
+    if (!ed?.id) return;
+    if (onSelectEdition) onSelectEdition(ed.id);
+    if (onSwitchToEdition) onSwitchToEdition();
+  };
+
+  const years = [...new Set(editions.map((e) => e.year))].sort((a, b) => b.localeCompare(a));
+  const filtered = yearFilter ? editions.filter((e) => e.year === yearFilter) : editions;
+
   return (
-    <div style={{ maxWidth: 820, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
-      <div style={{ padding: "40px 0 32px", textAlign: "center" }}>
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 24px", animation: "fadeIn 0.4s ease" }}>
+      {/* Header */}
+      <div style={{ padding: "40px 0 24px", textAlign: "center" }}>
         <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>Archives</div>
         <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 6 }}>Past Editions</h2>
         <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>{editions.length} weeks of your life, published</p>
-        <div style={{ width: 40, height: 2, backgroundColor: C.accent, margin: "16px auto 0" }} />
+      </div>
+
+      {/* Controls bar */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`,
+        padding: "12px 0", marginBottom: 32,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", gap: 0 }}>
+            {years.map((y, i) => (
+              <button key={y} onClick={() => setYearFilter(y)} style={{
+                fontFamily: F.sans, fontSize: 11, fontWeight: yearFilter === y ? 500 : 400,
+                color: yearFilter === y ? C.bg : C.inkMuted,
+                backgroundColor: yearFilter === y ? C.ink : "transparent",
+                border: `1px solid ${yearFilter === y ? C.ink : C.rule}`,
+                padding: "5px 16px", cursor: "pointer", marginLeft: i > 0 ? -1 : 0,
+              }}>{y}</button>
+            ))}
+          </div>
+          {isPublisher && (
+            <button onClick={() => setBuilderOpen(true)} style={{
+              display: "flex", alignItems: "center", gap: 6,
+              fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+              color: C.bg, backgroundColor: C.ink,
+              border: "none", padding: "6px 14px", cursor: "pointer",
+            }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/>
+              </svg>
+              Create Edition
+            </button>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => setViewMode("list")} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "list" ? C.ink : C.rule}`,
+            opacity: viewMode === "list" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <line x1="1" y1="3" x2="15" y2="3"/><line x1="1" y1="8" x2="15" y2="8"/><line x1="1" y1="13" x2="15" y2="13"/>
+            </svg>
+          </button>
+          <button onClick={() => setViewMode("grid")} style={{
+            padding: "6px 8px", cursor: "pointer", backgroundColor: "transparent",
+            border: `1px solid ${viewMode === "grid" ? C.ink : C.rule}`,
+            opacity: viewMode === "grid" ? 1 : 0.5, display: "flex", alignItems: "center",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke={C.inkMuted} strokeWidth="1.5">
+              <rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/>
+              <rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       {loading && <LoadingBlock C={C} text="Loading archives..." />}
 
-      {/* Year filter */}
-      <div style={{ display: "flex", justifyContent: "center", gap: 0, marginBottom: 32 }}>
-        {["2026", "2025"].map((y, i) => (
-          <button key={y} style={{
-            fontFamily: F.sans, fontSize: 11, fontWeight: i === 0 ? 500 : 400,
-            color: i === 0 ? C.bg : C.inkMuted,
-            backgroundColor: i === 0 ? C.ink : "transparent",
-            border: `1px solid ${i === 0 ? C.ink : C.rule}`,
-            padding: "6px 20px", cursor: "pointer", marginLeft: i > 0 ? -1 : 0,
-          }}>{y}</button>
-        ))}
-      </div>
-
-      {/* Edition grid */}
-      {!loading && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 60 }}>
-        {editions.map((ed, i) => (
-          <div key={i} style={{
-            border: `1px solid ${C.rule}`, cursor: "pointer",
-            transition: "border-color 0.2s, transform 0.2s",
-            animation: `fadeInUp 0.4s ease ${i * 0.05}s both`,
-          }}
-            onClick={() => {
-              if (!ed?.id) return;
-              if (onSelectEdition) onSelectEdition(ed.id);
-              if (onSwitchToEdition) onSwitchToEdition();
+      {/* LIST VIEW */}
+      {!loading && viewMode === "list" && (
+        <div>
+          {filtered.map((ed, i) => (
+            <div key={ed.id} onClick={() => openEdition(ed)} style={{
+              display: "grid", gridTemplateColumns: "80px 1fr", gap: 24,
+              padding: "24px 0", borderBottom: `1px solid ${C.rule}`,
+              cursor: "pointer", animation: `fadeInUp 0.4s ease ${i * 0.04}s both`,
+              transition: "background-color 0.15s",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.ink; e.currentTarget.style.transform = "translateY(-2px)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.rule; e.currentTarget.style.transform = "translateY(0)"; }}
-          >
-            {/* Edition cover */}
-            <div style={{ padding: "20px 16px 16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div>
-                  <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>Vol. I · {ed.num}</div>
-                  <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted, marginTop: 2 }}>{ed.week}</div>
-                </div>
-                <span style={{ fontSize: 16 }}>{ed.mood}</span>
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.sectionBg; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+            >
+              <div style={{ textAlign: "right", paddingRight: 8, borderRight: `2px solid ${C.rule}` }}>
+                <div style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{ed.num}</div>
+                <div style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted, marginTop: 4 }}>{ed.week}</div>
               </div>
-              <div style={{ height: 1, backgroundColor: C.ruleDark, marginBottom: 12 }} />
-              <h3 style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, lineHeight: 1.3, color: C.ink, marginBottom: 12, minHeight: 40 }}>{ed.headline}</h3>
-              <div style={{ display: "flex", gap: 12 }}>
-                <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{ed.entries} entries</span>
-                <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{ed.words.toLocaleString()} words</span>
+              <div>
+                <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>{ed.topSection}</div>
+                <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.25, color: C.ink, marginBottom: 8 }}>{ed.headline}</h3>
+                {ed.edNote && <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", lineHeight: 1.6, color: C.inkMuted, marginBottom: 10 }}>{ed.edNote}</p>}
+                <div style={{ display: "flex", gap: 12, fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+                  <span>{ed.entries} entries</span>
+                  <span>{(ed.words || 0).toLocaleString()} words</span>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>}
+          ))}
+          {filtered.length === 0 && (
+            <div style={{ textAlign: "center", padding: "60px 0" }}>
+              <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>No editions for {yearFilter}.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* GRID VIEW */}
+      {!loading && viewMode === "grid" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }}>
+          {filtered.map((ed, i) => (
+            <div key={ed.id} onClick={() => openEdition(ed)} style={{
+              cursor: "pointer", transition: "transform 0.2s",
+              animation: `fadeInUp 0.4s ease ${i * 0.05}s both`,
+            }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-4px)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+            >
+              {/* Cover image area — placeholder */}
+              <div style={{
+                height: 200, overflow: "hidden",
+                border: `1px solid ${C.rule}`, borderBottom: "none", position: "relative",
+                backgroundColor: C.sectionBg,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+                </svg>
+                <div style={{
+                  position: "absolute", top: 12, left: 14,
+                  fontFamily: F.sans, fontSize: 9, fontWeight: 600,
+                  color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1.5px",
+                }}>Vol. I · No. {ed.num}</div>
+                <div style={{
+                  position: "absolute", bottom: 12, left: 14,
+                  fontFamily: F.sans, fontSize: 10, color: C.inkMuted,
+                }}>{ed.week}, {ed.year}</div>
+              </div>
+              {/* Card body */}
+              <div style={{
+                border: `1px solid ${C.rule}`, borderTop: `2px solid ${C.ink}`,
+                padding: "14px 14px 16px",
+              }}>
+                <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 6 }}>{ed.topSection}</div>
+                <h3 style={{
+                  fontFamily: F.display, fontSize: 16, fontWeight: 700,
+                  lineHeight: 1.3, color: C.ink, marginBottom: 8, minHeight: 42,
+                }}>{ed.headline}</h3>
+                <div style={{ display: "flex", justifyContent: "space-between", fontFamily: F.sans, fontSize: 10, color: C.inkFaint }}>
+                  <span>{ed.entries} entries</span>
+                  <span>{(ed.words || 0).toLocaleString()} words</span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "60px 0" }}>
+              <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted }}>No editions for {yearFilter}.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ height: 60 }} />
+
+      {/* Edition Builder overlay */}
+      {builderOpen && (
+        <EditionBuilder
+          C={C}
+          userId={userId}
+          session={session}
+          onClose={() => setBuilderOpen(false)}
+          onCreated={handleEditionCreated}
+        />
+      )}
     </div>
   );
 }
@@ -1384,7 +2180,7 @@ function SectionsView({ C, userId, onOpenArticle }) {
             <div style={{ borderTop: si === 0 ? `2px solid ${C.ink}` : `1px solid ${C.rule}`, paddingTop: 20, marginTop: si === 0 ? 12 : 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, color: C.ink }}>{sec.name}</span>
+                  <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px" }}>{sec.name}</span>
                   <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{sec.count} entries · {sec.words} words</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -2803,7 +3599,7 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
           Back
         </button>
         <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, letterSpacing: "0.5px" }}>
-          {edCtx ? `Vol. ${edCtx.volume} · No. ${edCtx.number || edCtx.num}` : "My Journal"}
+          {edCtx ? `Vol. ${edCtx.volume} · No. ${edCtx.number || edCtx.num}` : "Notebook"}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {entry.is_public && (
@@ -2893,16 +3689,6 @@ function ArticleView({ entry, edition, onClose, onPrev, onNext, C, isProUser, si
               </span>
             ))}
           </div>
-
-          {/* AI badge */}
-          {hasAiEdit && (
-            <div style={{
-              fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent,
-              marginBottom: 32,
-            }}>
-              ✦ AI · {entry.ai_edit.tone || entry.ai_edit.mode}
-            </div>
-          )}
 
           {/* Photo */}
           {photo && (
@@ -3266,16 +4052,6 @@ function PublicEntryView() {
           {metaParts.join(" · ")}
         </div>
 
-        {/* AI badge */}
-        {hasAiEdit && (
-          <div style={{
-            fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: "#c41e1e",
-            marginBottom: 24, display: "flex", alignItems: "center", gap: 4,
-          }}>
-            ✦ AI · {entry.ai_edit.tone || entry.ai_edit.mode}
-          </div>
-        )}
-
         {/* Photo */}
         {photo && (
           <div style={{ marginBottom: 32 }}>
@@ -3364,89 +4140,244 @@ function PublicEditionView() {
   const editionId = window.location.pathname.split("/edition/")[1];
 
   useEffect(() => {
-    if (!editionId) {
-      setError("Edition not found.");
-      setLoading(false);
-      return;
-    }
+    if (!editionId) { setError("Edition not found."); setLoading(false); return; }
     fetchPublicEdition(editionId)
       .then(setEditionData)
       .catch(() => setError("This edition is private or unavailable."))
       .finally(() => setLoading(false));
   }, [editionId]);
 
+  const C = getTheme("light", "red");
+
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }}>
-        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 28, fontWeight: 700, color: "#121212" }}>The Hauss</div>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: C.bg }}>
+        <div style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink }}>The Hauss</div>
       </div>
     );
   }
 
   if (error || !editionData) {
     return (
-      <div style={{ minHeight: "100vh", backgroundColor: "#fff", color: "#121212" }}>
-        <div style={{ borderBottom: "1px solid #e2e2e2", padding: "0 24px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <a href="/" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 22, fontWeight: 700, color: "#121212", textDecoration: "none" }}>The Hauss</a>
-          <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: "#fff", backgroundColor: "#121212", padding: "8px 18px", textDecoration: "none" }}>Start Writing</a>
+      <div style={{ minHeight: "100vh", backgroundColor: C.bg, color: C.ink }}>
+        <div style={{ borderBottom: `1px solid ${C.rule}`, padding: "0 24px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <a href="/" style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, textDecoration: "none" }}>The Hauss</a>
+          <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, padding: "8px 18px", textDecoration: "none" }}>Start Writing</a>
         </div>
         <div style={{ maxWidth: 740, margin: "0 auto", padding: "100px 24px", textAlign: "center" }}>
           <h1 style={{ fontFamily: F.display, fontSize: 34, marginBottom: 12 }}>Edition Unavailable</h1>
-          <p style={{ fontFamily: F.body, fontSize: 16, fontStyle: "italic", color: "#727272" }}>{error}</p>
+          <p style={{ fontFamily: F.body, fontSize: 16, fontStyle: "italic", color: C.inkMuted }}>{error}</p>
         </div>
       </div>
     );
   }
 
   const isCover = editionData.mode === "cover";
+  const author = editionData.author || {};
+  const pubTitle = author.publication_name || "The Hauss";
+  const pubMotto = author.motto || "All the life that's fit to print";
+  const authorName = author.name || "";
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#fff", color: "#121212" }}>
-      <div style={{ borderBottom: "1px solid #e2e2e2", padding: "0 24px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <a href="/" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 22, fontWeight: 700, color: "#121212", textDecoration: "none" }}>The Hauss</a>
-        <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: "#fff", backgroundColor: "#121212", padding: "8px 18px", textDecoration: "none" }}>Start Writing</a>
+    <div style={{ minHeight: "100vh", backgroundColor: C.bg, color: C.ink }}>
+      {/* Navbar */}
+      <div style={{ borderBottom: `1px solid ${C.rule}`, padding: "0 24px", height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <a href="/" style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, textDecoration: "none" }}>The Hauss</a>
+        <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 500, color: C.bg, backgroundColor: C.ink, padding: "8px 18px", textDecoration: "none" }}>Start Writing</a>
       </div>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px 24px 60px" }}>
-        <header style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: "#c41e1e", textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 8 }}>
-            Shared Edition
-          </div>
-          <h1 style={{ fontFamily: F.display, fontSize: 40, fontWeight: 700, marginBottom: 6 }}>
-            Vol. {editionData.edition.volume} · No. {editionData.edition.num || editionData.edition.number}
-          </h1>
-          <div style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: "#727272" }}>
-            Week of {editionData.edition.week}
+        {/* MASTHEAD — mirrors internal edition view */}
+        <header style={{ textAlign: "center", padding: "20px 0 12px" }}>
+          {authorName && (
+            <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 10 }}>
+              {authorName}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, flex: 1 }}>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>
+                {editionData.edition.publication_date || editionData.edition.week}
+              </span>
+              {(editionData.edition.publication_city || author.city) && (
+                <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>
+                  {editionData.edition.publication_city || author.city}
+                  {editionData.edition.publication_temperature != null ? ` · ${Math.round(editionData.edition.publication_temperature)}°C` : ""}
+                </span>
+              )}
+            </div>
+            <div style={{ flex: 2, display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ width: "100%", height: 2, backgroundColor: C.ruleDark || C.ink }} />
+              <h1 style={{ fontFamily: F.display, fontSize: 40, fontWeight: 700, letterSpacing: "-0.5px", lineHeight: 1.1, margin: "8px 0", color: C.ink }}>{pubTitle}</h1>
+              <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginBottom: 8, letterSpacing: "0.5px" }}>{pubMotto}</div>
+              <div style={{ width: "100%", height: 2, backgroundColor: C.ruleDark || C.ink }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flex: 1 }}>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{editionData.edition.number}</span>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{editionData.edition.entryCount} entries</span>
+            </div>
           </div>
         </header>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: 20, marginBottom: 24 }}>
-          <span style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{editionData.edition.entryCount} entries</span>
-          <span style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{editionData.stats?.wordsThisWeek?.toLocaleString?.() || 0} words</span>
-          <span style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{isCover ? "Cover view" : "Full reading"}</span>
-        </div>
-
-        {isCover ? (
-          <div style={{ border: "1px solid #e2e2e2", backgroundColor: "#f7f7f7", padding: "30px 24px", textAlign: "center" }}>
-            <div style={{ fontFamily: F.display, fontSize: 22, marginBottom: 8 }}>This edition is shared in cover mode</div>
-            <p style={{ fontFamily: F.body, fontSize: 14, color: "#727272", fontStyle: "italic", marginBottom: 14 }}>
-              Reader tier shares an editorial cover preview. Upgrade to unlock full reading links.
-            </p>
-            <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, color: "#c41e1e", textDecoration: "none" }}>Create your own edition →</a>
+        {/* Two-column layout — top stories + sidebar */}
+        {(editionData.topStories?.length > 0 || editionData.editorial?.content) ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 340px", padding: "24px 0" }}>
+            {/* Left column: top stories */}
+            <div style={{ paddingRight: 28 }}>
+              {editionData.topStories[0] && (
+                <article
+                  onClick={isCover ? undefined : () => { window.location.href = `/entry/${editionData.topStories[0].id}`; }}
+                  style={{ cursor: isCover ? "default" : "pointer" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[0].section}</span>
+                  </div>
+                  <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 700, lineHeight: 1.15, color: C.ink, marginBottom: 10 }}>{editionData.topStories[0].headline}</h2>
+                  {editionData.topStories[0].subhead && (
+                    <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkLight, lineHeight: 1.5, marginBottom: 16 }}>{editionData.topStories[0].subhead}</p>
+                  )}
+                  <div style={{ backgroundColor: C.sectionBg, height: 200, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                  </div>
+                  <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{editionData.topStories[0].excerpt?.slice(0, 200)}{editionData.topStories[0].excerpt?.length > 200 ? "..." : ""}</p>
+                  <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
+                    <span>{editionData.topStories[0].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[0].date}</span>
+                  </div>
+                </article>
+              )}
+              {editionData.topStories[1] && (<>
+                <div style={{ height: 1, backgroundColor: C.rule, margin: "24px 0" }} />
+                <article
+                  onClick={isCover ? undefined : () => { window.location.href = `/entry/${editionData.topStories[1].id}`; }}
+                  style={{ cursor: isCover ? "default" : "pointer" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[1].section}</span>
+                  </div>
+                  <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 600, lineHeight: 1.2, color: C.ink, marginBottom: 8 }}>{editionData.topStories[1].headline}</h3>
+                  {editionData.topStories[1].subhead && (
+                    <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkLight, marginBottom: 8 }}>{editionData.topStories[1].subhead}</p>
+                  )}
+                  <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 10 }}>{editionData.topStories[1].excerpt?.slice(0, 150)}{editionData.topStories[1].excerpt?.length > 150 ? "..." : ""}</p>
+                  <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
+                    <span>{editionData.topStories[1].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[1].date}</span>
+                  </div>
+                </article>
+              </>)}
+            </div>
+            {/* Divider */}
+            <div style={{ backgroundColor: C.rule }} />
+            {/* Right column: sidebar */}
+            <div style={{ paddingLeft: 28 }}>
+              {editionData.briefing?.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <h3 style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, color: C.ink, marginBottom: 4 }}>The Week at a Glance</h3>
+                  <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, marginBottom: 10 }}>{editionData.edition.week}</div>
+                  <div style={{ height: 2, backgroundColor: C.accent, marginBottom: 14, width: 40 }} />
+                  {editionData.briefing.map((item, i) => (
+                    <div key={i} style={{ display: "flex", gap: 12, marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${C.rule}` }}>
+                      <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, whiteSpace: "nowrap", minWidth: 30 }}>{item.day}</span>
+                      <span style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.5, color: C.inkLight }}>{item.note}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {editionData.editorial?.content && (
+                <div style={{ backgroundColor: C.sectionBg, padding: 20, marginBottom: 24 }}>
+                  <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
+                  <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>{editionData.editorial.headline}</h3>
+                  <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{editionData.editorial.content}</p>
+                  <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>
+                    — {editionData.edition?.is_custom && editionData.author?.name ? editionData.author.name : "The Hauss Editor"}
+                  </div>
+                </div>
+              )}
+              {editionData.sections?.length > 0 && (
+                <div>
+                  <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink, marginBottom: 10 }}>All Sections</h3>
+                  <div style={{ height: 2, backgroundColor: C.accent, marginBottom: 14, width: 40 }} />
+                  {editionData.sections.map((s, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.rule}` }}>
+                      <span style={{ fontFamily: F.sans, fontSize: 12, color: C.inkLight }}>{s.name}</span>
+                      <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, backgroundColor: C.sectionBg, padding: "2px 8px" }}>{s.count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {(editionData.topStories || []).concat(editionData.moreStories || []).map((s, i) => (
-              <a key={`${s.id}-${i}`} href={`/entry/${s.id}`} style={{ border: "1px solid #e2e2e2", padding: "14px 16px", textDecoration: "none", color: "#121212" }}>
-                <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: "#c41e1e", textTransform: "uppercase", letterSpacing: "1.2px", marginBottom: 6 }}>
-                  {s.section}
+          /* Cover mode with no stories — show editorial-only view */
+          <div style={{ padding: "40px 0" }}>
+            {editionData.editorial?.content && (
+              <div style={{ backgroundColor: C.sectionBg, padding: 24, maxWidth: 600, margin: "0 auto", marginBottom: 24 }}>
+                <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
+                <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>The Editor's Note</h3>
+                <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{editionData.editorial.content}</p>
+                <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>
+                  — {editionData.edition?.is_custom && editionData.author?.name ? editionData.author.name : "The Hauss Editor"}
                 </div>
-                <h3 style={{ fontFamily: F.display, fontSize: 20, lineHeight: 1.25, marginBottom: 8 }}>{s.headline}</h3>
-                <div style={{ fontFamily: F.sans, fontSize: 11, color: "#727272" }}>{s.readTime}</div>
-              </a>
-            ))}
+              </div>
+            )}
+            <div style={{ textAlign: "center", padding: "20px 0" }}>
+              <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 12 }}>
+                {editionData.edition.entryCount} entries · {editionData.stats?.wordsThisWeek?.toLocaleString() || 0} words this week
+              </p>
+            </div>
           </div>
         )}
+
+        {/* More Stories */}
+        {editionData.moreStories?.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ height: 2, backgroundColor: C.ink, marginBottom: 16 }} />
+            <h3 style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: C.inkMuted, marginBottom: 16 }}>Also in This Edition</h3>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(editionData.moreStories.length, 3)}, 1fr)`, gap: 24 }}>
+              {editionData.moreStories.map((s, i) => (
+                <div
+                  key={i}
+                  onClick={isCover ? undefined : () => { window.location.href = `/entry/${s.id}`; }}
+                  style={{ borderRight: i < editionData.moreStories.length - 1 ? `1px solid ${C.rule}` : "none", paddingRight: 24, cursor: isCover ? "default" : "pointer" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{s.section}</span>
+                  </div>
+                  <h4 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, lineHeight: 1.25, color: C.ink, marginBottom: 8 }}>{s.headline}</h4>
+                  <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{s.readTime}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stats bar */}
+        <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, marginBottom: 24 }}>
+          {[
+            { n: editionData.stats?.totalEntries?.toLocaleString() || "0", l: "Total Entries" },
+            { n: editionData.stats?.thisEdition || "0", l: "This Edition" },
+            { n: editionData.stats?.wordsThisWeek?.toLocaleString() || "0", l: "Words" },
+          ].map((s, i, a) => (
+            <div key={i} style={{ display: "flex", alignItems: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 32px" }}>
+                <span style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink }}>{s.n}</span>
+                <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", marginTop: 4 }}>{s.l}</span>
+              </div>
+              {i < a.length - 1 && <div style={{ width: 1, height: 36, backgroundColor: C.rule }} />}
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <footer style={{ textAlign: "center", padding: "20px 0" }}>
+          <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>
+            Published with <a href="/" style={{ color: C.ink, textDecoration: "none", fontWeight: 600 }}>The Hauss</a>
+          </div>
+          {isCover && (
+            <a href="/login" style={{ fontFamily: F.sans, fontSize: 12, color: C.accent, textDecoration: "none", marginTop: 8, display: "inline-block" }}>
+              Start your own edition →
+            </a>
+          )}
+        </footer>
       </div>
     </div>
   );
@@ -3468,6 +4399,7 @@ export default function App() {
   const [articleIndex, setArticleIndex] = useState(0);
   const [pubName, setPubName] = useState("The Deborah Times");
   const [motto, setMotto] = useState("All the life that's fit to print");
+  const [city, setCity] = useState("");
   const [view, setView] = useState("journal"); // journal | edition | archives | sections | reflections
 
   // Auth: check session on mount + listen for changes
@@ -3483,9 +4415,8 @@ export default function App() {
 
   const [editionData, setEditionData] = useState(null);
   const [editionLoading, setEditionLoading] = useState(true);
-  const [editionPeriod, setEditionPeriod] = useState("week");
   const [selectedEditionId, setSelectedEditionId] = useState(null);
-  const [editionsList, setEditionsList] = useState([]);
+  const [fallbackTemp, setFallbackTemp] = useState(null);
   const [shareSaving, setShareSaving] = useState(false);
   const [shareToast, setShareToast] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -3602,39 +4533,44 @@ export default function App() {
         setProfile(p);
         if (p?.publication_name) setPubName(p.publication_name);
         if (p?.motto) setMotto(p.motto);
+        if (p?.city !== undefined) setCity(p.city || "");
         if (p?.theme_mode) setMode(p.theme_mode);
         if (p?.theme_accent) setAccent(p.theme_accent);
       })
       .catch(console.error);
   }, [userId]);
 
-  // Fetch edition data based on period selection
+  // Fetch edition data — always latest, or a specific one selected from Archives
   useEffect(() => {
     if (!userId) return;
-    const effectivePeriod = canAccessArchives ? editionPeriod : "week";
-    if (effectivePeriod === "archive") {
-      fetchAllEditions(userId)
-        .then(setEditionsList)
-        .catch(console.error);
-      if (!selectedEditionId) {
-        setEditionData(null);
-        setEditionLoading(false);
-        return;
-      }
-      setEditionLoading(true);
+    setEditionLoading(true);
+    if (selectedEditionId) {
       fetchEditionById(userId, selectedEditionId)
         .then(setEditionData)
         .catch(console.error)
         .finally(() => setEditionLoading(false));
+    } else {
+      fetchEditionByOffset(userId, 0)
+        .then(setEditionData)
+        .catch(console.error)
+        .finally(() => setEditionLoading(false));
+    }
+  }, [userId, dataVersion, selectedEditionId]);
+
+  // Fallback: fetch temperature client-side when edition has no stored temp (e.g. old editions)
+  useEffect(() => {
+    const ed = editionData?.edition;
+    const cityForTemp = ed?.publication_city || city;
+    if (!ed || !cityForTemp || ed.publication_temperature != null) {
+      setFallbackTemp(null);
       return;
     }
-    setEditionLoading(true);
-    const offset = effectivePeriod === "week" ? 0 : effectivePeriod === "last" ? 1 : 2;
-    fetchEditionByOffset(userId, offset)
-      .then(setEditionData)
-      .catch(console.error)
-      .finally(() => setEditionLoading(false));
-  }, [userId, dataVersion, editionPeriod, selectedEditionId, canAccessArchives]);
+    let cancelled = false;
+    fetchCityWeather(cityForTemp).then(({ temperature }) => {
+      if (!cancelled && temperature != null) setFallbackTemp(temperature);
+    });
+    return () => { cancelled = true; };
+  }, [editionData?.edition?.id, editionData?.edition?.publication_city, editionData?.edition?.publication_temperature, city]);
 
   // Public entry route — accessible without auth
   if (window.location.pathname.startsWith("/entry/")) {
@@ -3695,7 +4631,7 @@ export default function App() {
           backgroundColor: C.bg, transition: "background-color 0.4s ease",
         }}>
           {[
-            { key: "journal", label: "My Journal" },
+            { key: "journal", label: "Notebook" },
             { key: "edition", label: "Last Edition" },
             { key: "archives", label: "Archives" },
             { key: "sections", label: "Sections" },
@@ -3719,11 +4655,13 @@ export default function App() {
           <ArchivesView
             C={C}
             userId={userId}
+            user={user}
+            session={session}
             onSelectEdition={(id) => {
               setSelectedEditionId(id);
-              setEditionPeriod("archive");
             }}
             onSwitchToEdition={() => setView("edition")}
+            onRefresh={handleRefresh}
           />
         ) : view === "sections" ? (
           <SectionsView C={C} userId={userId} onOpenArticle={openArticle} />
@@ -3733,28 +4671,13 @@ export default function App() {
         <div>
         {editionLoading ? <LoadingBlock C={C} text="Loading edition..." /> : !editionData ? (
           <div style={{ textAlign: "center", padding: "80px 0" }}>
-            {editionPeriod === "archive" ? (
-              <div>
-                <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>
-                  {editionsList.length > 0 ? "Select an edition from the list above." : "No editions in archive yet."}
-                </p>
-                <button onClick={() => setEditionPeriod("week")} style={{
-                  marginTop: 16, fontFamily: F.sans, fontSize: 12, fontWeight: 500,
-                  color: C.ink, background: "none", border: `1px solid ${C.rule}`,
-                  padding: "8px 20px", cursor: "pointer",
-                }}>← Back to This Week</button>
-              </div>
-            ) : editionPeriod === "last" || editionPeriod === "month" ? (
-              <div>
-                <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>No edition for this period.</p>
-                <button onClick={() => setEditionPeriod("week")} style={{
-                  marginTop: 16, fontFamily: F.sans, fontSize: 12, fontWeight: 500,
-                  color: C.ink, background: "none", border: `1px solid ${C.rule}`,
-                  padding: "8px 20px", cursor: "pointer",
-                }}>← Back to This Week</button>
-              </div>
-            ) : (
-              <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>No editions yet. Start writing!</p>
+            <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>No editions yet. Start writing!</p>
+            {selectedEditionId && (
+              <button onClick={() => setSelectedEditionId(null)} style={{
+                marginTop: 16, fontFamily: F.sans, fontSize: 12, fontWeight: 500,
+                color: C.ink, background: "none", border: `1px solid ${C.rule}`,
+                padding: "8px 20px", cursor: "pointer",
+              }}>← Back to Latest Edition</button>
             )}
           </div>
         ) : (<>
@@ -3762,8 +4685,13 @@ export default function App() {
         <header style={{ textAlign: "center", padding: "20px 0 12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, flex: 1 }}>
-              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>Week of {editionData.edition.week}</span>
-              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>São Paulo · 28°C</span>
+              <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>{editionData.edition.publication_date || editionData.edition.week}</span>
+              {(editionData.edition.publication_city || city) && (
+                <span style={{ fontFamily: F.sans, fontSize: 10, color: C.inkMuted }}>
+                  {editionData.edition.publication_city || city}
+                  {(editionData.edition.publication_temperature ?? fallbackTemp) != null ? ` · ${Math.round(editionData.edition.publication_temperature ?? fallbackTemp)}°C` : ""}
+                </span>
+              )}
             </div>
             <div style={{ flex: 2, display: "flex", flexDirection: "column", alignItems: "center" }}>
               <div style={{ width: "100%", height: 2, backgroundColor: C.ruleDark }} />
@@ -3812,17 +4740,15 @@ export default function App() {
           </div>
         </header>
         <Ticker C={C} />
-        <EditionSwitcher
-          C={C}
-          period={editionPeriod}
-          onPeriodChange={setEditionPeriod}
-          canAccessArchives={canAccessArchives}
-          editionsList={editionsList}
-          onSelectEdition={(id) => {
-            setSelectedEditionId(id);
-            setEditionPeriod("archive");
-          }}
-        />
+        {selectedEditionId && (
+          <div style={{ textAlign: "center", padding: "10px 0", borderBottom: `1px solid ${C.rule}` }}>
+            <button onClick={() => setSelectedEditionId(null)} style={{
+              fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+              color: C.inkMuted, background: "none", border: "none",
+              cursor: "pointer",
+            }}>← Back to Latest Edition</button>
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 340px", padding: "24px 0", animation: "fadeInUp 0.6s ease 0.2s both" }}>
           <div style={{ paddingRight: 28 }}>
@@ -3830,7 +4756,7 @@ export default function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[0].section}</span>
                 {editionData.topStories[0].isPublic && <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg> Public</span>}
-                {editionData.topStories[0].aiEdited && <span style={{ fontFamily: F.sans, fontSize: 9, color: C.accent, display: "flex", alignItems: "center", gap: 3 }}>✦ AI</span>}
+                {null}
               </div>
               <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 700, lineHeight: 1.15, color: C.ink, marginBottom: 10 }}>{editionData.topStories[0].headline}</h2>
               <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkLight, lineHeight: 1.5, marginBottom: 16 }}>{editionData.topStories[0].subhead}</p>
@@ -3873,7 +4799,9 @@ export default function App() {
               <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
               <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>{editionData.editorial.headline}</h3>
               <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{editionData.editorial.content}</p>
-              <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>— AI Editor</div>
+              <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>
+                — {editionData.edition?.is_custom ? (user?.name || profile?.name || "Editor") : "The Hauss Editor"}
+              </div>
             </div>
             <div>
               <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink, marginBottom: 10 }}>All Sections</h3>
@@ -3934,7 +4862,7 @@ export default function App() {
       </div>
 
       {editorOpen && <EditorView onClose={() => setEditorOpen(false)} onPublished={handleRefresh} C={C} userId={userId} session={session} />}
-      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} pubName={pubName} setPubName={setPubName} motto={motto} setMotto={setMotto} userId={userId} />
+      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} pubName={pubName} setPubName={setPubName} motto={motto} setMotto={setMotto} city={city} setCity={setCity} userId={userId} />
       {adminOpen && <AdminPage C={C} onClose={() => setAdminOpen(false)} session={session} />}
       {articleEntry && (
         <ArticleView

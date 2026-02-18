@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
+import CityField from "./components/CityField";
 
 const F = {
   display: "'Playfair Display', Georgia, serif",
@@ -13,6 +14,7 @@ export default function AuthPage({ onAuth }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [city, setCity] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -35,7 +37,7 @@ export default function AuthPage({ onAuth }) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name: name || email.split("@")[0] } },
+      options: { data: { name: name || email.split("@")[0], city: city || null } },
     });
     setLoading(false);
     if (error) { setError(error.message); return; }
@@ -54,7 +56,7 @@ export default function AuthPage({ onAuth }) {
     setMode("check-email");
   };
 
-  const switchMode = (newMode) => { setMode(newMode); setError(null); setConfirmPassword(""); };
+  const switchMode = (newMode) => { setMode(newMode); setError(null); setConfirmPassword(""); setCity(""); };
 
   // Check email confirmation screen
   if (mode === "check-email") {
@@ -135,6 +137,7 @@ export default function AuthPage({ onAuth }) {
           <form onSubmit={handleSignup}>
             <Field label="Name" type="text" value={name} onChange={setName} placeholder="How should we call you?" autoFocus />
             <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="your@email.com" />
+            <CityField label="City" value={city} onChange={setCity} placeholder="Where do you write from?" />
             <PasswordField label="Password" value={password} onChange={setPassword} placeholder="At least 6 characters" />
             <PasswordField label="Confirm Password" value={confirmPassword} onChange={setConfirmPassword} placeholder="Repeat your password" match={password} />
             <button type="submit" disabled={loading || !email || !password || !confirmPassword} style={btnPrimary(loading || !email || !password || !confirmPassword)}>

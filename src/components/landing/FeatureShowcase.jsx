@@ -80,7 +80,7 @@ export default function FeatureShowcase() {
           {/* Main column */}
           <div style={{ paddingRight: 32 }}>
             <MainFeature
-              title="My Journal"
+              title="Notebook"
               body="Your raw, intimate, day-by-day timeline. Every thought in chronological order, with mood, section, and source. The unedited record of your inner life."
             />
             <MainFeature
