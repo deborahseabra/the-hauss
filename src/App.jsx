@@ -12,6 +12,7 @@ import {
   fetchAllReflections,
   fetchReflection,
   getReflection,
+  fetchReflectionPeriods,
   fetchAskEditorUsage,
   submitAskEditorQuestion,
   createEntry,
@@ -33,6 +34,8 @@ import {
   updatePrompt,
   fetchUsageLimits,
   updateUsageLimit,
+  fetchEmailTemplates,
+  updateEmailTemplate,
   uploadAttachment,
   createAttachments,
   adminApi,
@@ -1924,8 +1927,11 @@ function CoverImageStep({ C, selectedIds, coverImageUrl, setCoverImageUrl, cover
 function EditionBuilder({ C, userId, session, onClose, onCreated }) {
   const [step, setStep] = useState(1); // 1=setup, 2=select, 3=cover, 4=arrange, 5=links, 6=preview
   const [title, setTitle] = useState("");
-  const [weekStart, setWeekStart] = useState(new Date().toISOString().slice(0, 10));
-  const [weekEnd, setWeekEnd] = useState(new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10));
+  const today = new Date();
+  const oneWeekAgo = new Date(today);
+  oneWeekAgo.setDate(today.getDate() - 7);
+  const [weekStart, setWeekStart] = useState(oneWeekAgo.toISOString().slice(0, 10));
+  const [weekEnd, setWeekEnd] = useState(today.toISOString().slice(0, 10));
   const [allEntries, setAllEntries] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [featuredIds, setFeaturedIds] = useState([]);
@@ -2918,6 +2924,13 @@ const SAMPLE_REFLECTION = {
 
 function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
   const [period, setPeriod] = useState("week");
+  const [periodDropOpen, setPeriodDropOpen] = useState(false);
+  const periodDropRef = useRef(null);
+  const [periodOptions, setPeriodOptions] = useState([]);
+  const [periodsLoading, setPeriodsLoading] = useState(true);
+  const [selectedPeriod, setSelectedPeriod] = useState(null);
+  const [periodRangeDropOpen, setPeriodRangeDropOpen] = useState(false);
+  const periodRangeDropRef = useRef(null);
   const [askQuery, setAskQuery] = useState("");
   const [askAnswer, setAskAnswer] = useState(null);
   const [askLoading, setAskLoading] = useState(false);
@@ -2927,53 +2940,59 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
   const [askUsage, setAskUsage] = useState({ used: 0, limit: 0, allowed: true });
 
   const isReader = userRole === "reader";
+  const currentPeriodLabel = REFLECTION_PERIODS.find((p) => p.key === period)?.label ?? "Week";
+  const selectedPeriodLabel = selectedPeriod?.label ?? (periodOptions[0]?.label ?? "—");
 
+  // When period type changes, fetch list of available periods and select the first (most recent)
+  useEffect(() => {
+    if (!userId || isReader) {
+      setPeriodOptions([]);
+      setSelectedPeriod(null);
+      setPeriodsLoading(false);
+      return;
+    }
+    setPeriodsLoading(true);
+    fetchReflectionPeriods(userId, period)
+      .then((opts) => {
+        setPeriodOptions(opts);
+        setSelectedPeriod(opts[0] ?? null);
+      })
+      .catch(() => {
+        setPeriodOptions([]);
+        setSelectedPeriod(null);
+      })
+      .finally(() => setPeriodsLoading(false));
+  }, [userId, period, isReader]);
+
+  // Load reflection for the selected period (or latest when selectedPeriod is set from options above)
   useEffect(() => {
     if (!userId || isReader) {
       setLoading(false);
       setReflectionData(isReader ? SAMPLE_REFLECTION : null);
       return;
     }
+    if (periodsLoading || (periodOptions.length === 0 && !selectedPeriod)) {
+      if (!periodsLoading) {
+        setLoading(false);
+        setReflectionData(null);
+      }
+      return;
+    }
     setLoading(true);
-    getReflection(userId, period)
+    const periodStart = selectedPeriod?.period_start ?? periodOptions[0]?.period_start ?? null;
+    getReflection(userId, period, periodStart)
       .then(setReflectionData)
       .catch(() => setReflectionData(null))
       .finally(() => setLoading(false));
-  }, [userId, period, isReader]);
+  }, [userId, period, isReader, periodsLoading, selectedPeriod?.period_start, periodOptions.length]);
 
   useEffect(() => {
     if (!userId || isReader) return;
     fetchAskEditorUsage().then(setAskUsage).catch(() => setAskUsage({ used: 0, limit: 0, allowed: false }));
   }, [userId, isReader, askAnswer]);
 
-  const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const getDateRangeForPeriod = () => {
-    const today = new Date();
-    if (period === "week") {
-      const dow = today.getDay();
-      const mondayOffset = dow === 0 ? -6 : 1 - dow;
-      const mon = new Date(today);
-      mon.setDate(today.getDate() + mondayOffset);
-      const sun = new Date(mon);
-      sun.setDate(mon.getDate() + 6);
-      return { from: toDateStr(mon), to: toDateStr(sun) };
-    }
-    if (period === "month") {
-      const first = new Date(today.getFullYear(), today.getMonth(), 1);
-      const last = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-      return { from: toDateStr(first), to: toDateStr(last) };
-    }
-    if (period === "quarter") {
-      const from = new Date(today);
-      from.setMonth(from.getMonth() - 3);
-      return { from: toDateStr(from), to: toDateStr(today) };
-    }
-    if (period === "year") return { from: "2000-01-01", to: toDateStr(today) };
-    return null;
-  };
-  const periodRange = getDateRangeForPeriod();
-  const periodFrom = periodRange?.from ?? null;
-  const periodTo = periodRange?.to ?? null;
+  const periodFrom = selectedPeriod?.period_start ?? null;
+  const periodTo = selectedPeriod?.period_end ?? null;
 
   useEffect(() => {
     if (!userId || !periodFrom || !periodTo) {
@@ -3001,25 +3020,56 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
         });
       })
       .catch(() => setPeriodStats(null));
-  }, [userId, period, periodFrom, periodTo]);
+  }, [userId, periodFrom, periodTo]);
 
   const P = reflectionData;
 
-  if (loading) return <LoadingBlock C={C} text="Loading reflections..." />;
+  if (periodsLoading || loading) return <LoadingBlock C={C} text="Loading reflections..." />;
 
   // Empty state for editor/publisher: no reflection yet for this period
   const nextRunLabel = { week: "Sunday", month: "the 1st of next month", quarter: "the start of next quarter", year: "January 1st" };
   if (!P) {
     return (
-      <div style={{ animation: "fadeIn 0.4s ease" }}>
-        <div style={{ padding: "32px 0 0", textAlign: "center" }}>
-          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 8 }}>✦ Reflections</div>
-          <h2 style={{ fontFamily: F.display, fontSize: 26, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Notes from your Editor</h2>
-          <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>Patterns, connections, and notes drawn from your writing.</p>
-          <div style={{ display: "flex", justifyContent: "center", gap: 0, flexWrap: "wrap", marginBottom: 24 }}>
-            {REFLECTION_PERIODS.map((p) => (
-              <button key={p.key} onClick={() => setPeriod(p.key)} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: period === p.key ? 500 : 400, color: period === p.key ? C.bg : C.inkMuted, backgroundColor: period === p.key ? C.ink : "transparent", border: `1px solid ${period === p.key ? C.ink : C.rule}`, padding: "6px 16px", cursor: "pointer", marginLeft: -1 }}>{p.label}</button>
-            ))}
+      <div style={{ animation: "fadeIn 0.4s ease", maxWidth: 900, margin: "0 auto", padding: "0 24px" }}>
+        <div style={{ padding: "40px 0 8px", textAlign: "center" }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>✦ Reflections</div>
+          <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink }}>Notes from your Editor</h2>
+          <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginTop: 6 }}>Patterns, connections, and notes drawn from your writing.</p>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, padding: "12px 0", marginBottom: 32, marginTop: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Dropdown C={C} dropRef={periodDropRef} trigger={currentPeriodLabel} open={periodDropOpen}
+              onToggle={() => { setPeriodDropOpen((o) => !o); setPeriodRangeDropOpen(false); }} width={180} active>
+              <div style={{ padding: "6px 0" }}>
+                {REFLECTION_PERIODS.map((p) => (
+                  <button key={p.key} onClick={() => { setPeriod(p.key); setPeriodDropOpen(false); }} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "10px 16px",
+                    backgroundColor: "transparent", border: "none", cursor: "pointer",
+                    borderLeft: period === p.key ? `3px solid ${C.accent}` : "3px solid transparent",
+                    transition: "background-color 0.1s",
+                  }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.sectionBg; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}>
+                    <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: period === p.key ? 600 : 400, color: C.ink }}>{p.label}</span>
+                  </button>
+                ))}
+              </div>
+            </Dropdown>
+            {periodOptions.length > 0 && (
+              <Dropdown C={C} dropRef={periodRangeDropRef} trigger={<span style={{ fontFamily: F.mono, fontSize: 11 }}>{selectedPeriodLabel}</span>}
+                open={periodRangeDropOpen} onToggle={() => setPeriodRangeDropOpen((o) => !o)} width={220}
+                active={selectedPeriod && periodOptions[0] && selectedPeriod.period_start !== periodOptions[0].period_start}>
+                <div style={{ padding: "6px 0" }}>
+                  {periodOptions.map((opt) => (
+                    <button key={opt.period_start} onClick={() => { setSelectedPeriod(opt); setPeriodRangeDropOpen(false); }} style={{
+                      display: "flex", width: "100%", padding: "10px 16px", backgroundColor: "transparent", border: "none", cursor: "pointer",
+                      borderLeft: selectedPeriod?.period_start === opt.period_start ? `3px solid ${C.accent}` : "3px solid transparent",
+                      transition: "background-color 0.1s",
+                    }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.sectionBg; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}>
+                      <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: selectedPeriod?.period_start === opt.period_start ? 600 : 400, color: C.ink }}>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </Dropdown>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 24px", textAlign: "center" }}>
@@ -3048,16 +3098,87 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
   };
 
   return (
-    <div style={{ animation: "fadeIn 0.4s ease", position: "relative" }}>
-      {/* Header + 4 period buttons */}
-      <div style={{ padding: "32px 0 0", textAlign: "center" }}>
-        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 8 }}>✦ Reflections</div>
-        <h2 style={{ fontFamily: F.display, fontSize: 26, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Notes from your Editor</h2>
-        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>Patterns, connections, and notes drawn from your writing. Choose a period to see what your editor noticed.</p>
-        <div style={{ display: "flex", justifyContent: "center", gap: 0, flexWrap: "wrap", marginBottom: 0 }}>
-          {REFLECTION_PERIODS.map((p) => (
-            <button key={p.key} onClick={() => { if (!isReader) { setPeriod(p.key); setAskAnswer(null); setAskQuery(""); } }} disabled={isReader} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: period === p.key ? 500 : 400, color: period === p.key ? C.bg : C.inkMuted, backgroundColor: period === p.key ? C.ink : "transparent", border: `1px solid ${period === p.key ? C.ink : C.rule}`, padding: "6px 16px", cursor: isReader ? "default" : "pointer", marginLeft: -1, opacity: isReader ? 0.4 : 1 }}>{p.label}</button>
-          ))}
+    <div style={{ animation: "fadeIn 0.4s ease", position: "relative", maxWidth: 900, margin: "0 auto", padding: "0 24px" }}>
+      {/* Header */}
+      <div style={{ padding: "40px 0 8px", textAlign: "center" }}>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 12 }}>✦ Reflections</div>
+        <h2 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink }}>Notes from your Editor</h2>
+        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginTop: 6 }}>
+          Patterns, connections, and notes drawn from your writing.
+        </p>
+      </div>
+
+      {/* Controls bar — same style as Journal: type (Week/Month/…) + which period (e.g. Feb 9–15) */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${C.ink}`, borderBottom: `1px solid ${C.rule}`, padding: "12px 0", marginBottom: 32, marginTop: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Dropdown
+            C={C}
+            dropRef={periodDropRef}
+            trigger={currentPeriodLabel}
+            open={periodDropOpen}
+            onToggle={() => { if (!isReader) setPeriodDropOpen((o) => !o); setPeriodRangeDropOpen(false); }}
+            width={180}
+            active
+          >
+            <div style={{ padding: "6px 0" }}>
+              {REFLECTION_PERIODS.map((p) => (
+                <button
+                  key={p.key}
+                  onClick={() => {
+                    if (!isReader) { setPeriod(p.key); setPeriodDropOpen(false); setAskAnswer(null); setAskQuery(""); }
+                  }}
+                  disabled={isReader}
+                  style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    width: "100%", padding: "10px 16px",
+                    backgroundColor: "transparent", border: "none", cursor: isReader ? "default" : "pointer",
+                    borderLeft: period === p.key ? `3px solid ${C.accent}` : "3px solid transparent",
+                    transition: "background-color 0.1s",
+                    opacity: isReader ? 0.6 : 1,
+                  }}
+                  onMouseEnter={(e) => { if (!isReader) e.currentTarget.style.backgroundColor = C.sectionBg; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+                >
+                  <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: period === p.key ? 600 : 400, color: C.ink }}>{p.label}</span>
+                </button>
+              ))}
+            </div>
+          </Dropdown>
+          {periodOptions.length > 0 && (
+            <Dropdown
+              C={C}
+              dropRef={periodRangeDropRef}
+              trigger={<span style={{ fontFamily: F.mono, fontSize: 11 }}>{selectedPeriodLabel}</span>}
+              open={periodRangeDropOpen}
+              onToggle={() => { if (!isReader) setPeriodRangeDropOpen((o) => !o); setPeriodDropOpen(false); }}
+              width={220}
+              active={selectedPeriod && periodOptions[0] && selectedPeriod.period_start !== periodOptions[0].period_start}
+            >
+              <div style={{ padding: "6px 0" }}>
+                {periodOptions.map((opt) => (
+                  <button
+                    key={opt.period_start}
+                    onClick={() => {
+                      if (!isReader) { setSelectedPeriod(opt); setPeriodRangeDropOpen(false); }
+                    }}
+                    disabled={isReader}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      width: "100%", padding: "10px 16px",
+                      backgroundColor: "transparent", border: "none", cursor: isReader ? "default" : "pointer",
+                      borderLeft: selectedPeriod?.period_start === opt.period_start ? `3px solid ${C.accent}` : "3px solid transparent",
+                      transition: "background-color 0.1s",
+                      opacity: isReader ? 0.6 : 1,
+                    }}
+                    onMouseEnter={(e) => { if (!isReader) e.currentTarget.style.backgroundColor = C.sectionBg; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+                  >
+                    <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: selectedPeriod?.period_start === opt.period_start ? 600 : 400, color: C.ink }}>{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </Dropdown>
+          )}
         </div>
       </div>
 
@@ -3072,7 +3193,7 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
       )}
 
       {/* ===== MAIN GRID: primary (wide) + sidebar (narrow) ===== */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 300px", gap: 0, borderTop: `2px solid ${C.ink}`, paddingTop: 20, marginTop: 16, animation: "fadeInUp 0.5s ease 0.1s both", filter: isReader ? "blur(3px)" : "none", pointerEvents: isReader ? "none" : "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 300px", gap: 0, paddingTop: 0, animation: "fadeInUp 0.5s ease 0.1s both", filter: isReader ? "blur(3px)" : "none", pointerEvents: isReader ? "none" : "auto" }}>
 
         {/* ===== PRIMARY COLUMN ===== */}
         <div style={{ paddingRight: 28 }}>
@@ -3391,6 +3512,7 @@ function AdminPage({ C, onClose, session }) {
     { id: "prompts", label: "Prompts" },
     { id: "users", label: "Users" },
     { id: "limits", label: "Limits" },
+    { id: "emails", label: "Email templates" },
     { id: "dashboard", label: "Dashboard" },
   ];
 
@@ -3436,6 +3558,7 @@ function AdminPage({ C, onClose, session }) {
           {tab === "prompts" && <AdminPromptsTab C={C} setSaveMsg={setSaveMsg} />}
           {tab === "users" && <AdminUsersTab C={C} session={session} setSaveMsg={setSaveMsg} />}
           {tab === "limits" && <AdminLimitsTab C={C} setSaveMsg={setSaveMsg} />}
+          {tab === "emails" && <AdminEmailTemplatesTab C={C} setSaveMsg={setSaveMsg} />}
           {tab === "dashboard" && <AdminDashboardTab C={C} session={session} />}
         </div>
       </div>
@@ -4002,6 +4125,106 @@ function AdminLimitsTab({ C, setSaveMsg }) {
           </tbody>
         </table>
       </div>
+    </>
+  );
+}
+
+// ── Admin: Email templates Tab (cron emails — letter_open, weekly_reflection) ──
+function AdminEmailTemplatesTab({ C, setSaveMsg }) {
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [editHtml, setEditHtml] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchEmailTemplates()
+      .then(setTemplates)
+      .catch((err) => console.error("Failed to load email templates:", err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const startEdit = (t) => {
+    setEditingId(t.id);
+    setEditHtml(t.html_content || "");
+    setSaveMsg(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditHtml("");
+    setSaveMsg(null);
+  };
+
+  const handleSave = async () => {
+    if (editingId == null) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      await updateEmailTemplate(editingId, { html_content: editHtml });
+      setTemplates((prev) => prev.map((t) => (t.id === editingId ? { ...t, html_content: editHtml } : t)));
+      setSaveMsg("Saved. Cron emails will use this template.");
+      setTimeout(() => setSaveMsg(null), 3000);
+      cancelEdit();
+    } catch (err) {
+      setSaveMsg("Error: " + (err.message || "Failed to save"));
+      setTimeout(() => setSaveMsg(null), 4000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div style={{ fontFamily: F.sans, fontSize: 13, color: C.inkMuted }}>Loading email templates…</div>;
+  }
+
+  return (
+    <>
+      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Email templates</h1>
+      <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkMuted, marginBottom: 24 }}>
+        HTML for cron-triggered emails. Use the placeholders listed below each template. Changes apply to the next send.
+      </p>
+      {templates.map((t) => (
+        <div key={t.id} style={{ border: `1px solid ${editingId === t.id ? C.accent : C.rule}`, marginBottom: 24, transition: "border-color 0.2s" }}>
+          <div style={{ padding: "16px 20px", backgroundColor: editingId === t.id ? C.sectionBg : "transparent", borderBottom: `1px solid ${C.rule}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink }}>{t.name}</div>
+              <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkMuted, marginTop: 4 }}>{t.description}</div>
+              {t.placeholders_doc && (
+                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 8, whiteSpace: "pre-wrap" }}>{t.placeholders_doc}</div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {editingId !== t.id ? (
+                <button onClick={() => startEdit(t)} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "5px 14px", cursor: "pointer" }}>Edit HTML</button>
+              ) : (
+                <>
+                  <button onClick={handleSave} disabled={saving} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.accent, border: "none", padding: "5px 14px", cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>{saving ? "Saving…" : "Save"}</button>
+                  <button onClick={cancelEdit} style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, background: "none", border: `1px solid ${C.rule}`, padding: "5px 14px", cursor: "pointer" }}>Cancel</button>
+                </>
+              )}
+            </div>
+          </div>
+          {editingId === t.id && (
+            <div style={{ padding: 16 }}>
+              <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>HTML content</label>
+              <textarea
+                value={editHtml}
+                onChange={(e) => setEditHtml(e.target.value)}
+                spellCheck={false}
+                style={{
+                  width: "100%", minHeight: 320, padding: 12, fontFamily: F.mono, fontSize: 12, lineHeight: 1.5,
+                  color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
+                  resize: "vertical", boxSizing: "border-box",
+                }}
+              />
+            </div>
+          )}
+        </div>
+      ))}
+      {templates.length === 0 && (
+        <p style={{ fontFamily: F.sans, fontSize: 13, color: C.inkMuted, fontStyle: "italic" }}>No email templates found. Run migration 020_email_templates.sql.</p>
+      )}
     </>
   );
 }

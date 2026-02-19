@@ -1092,19 +1092,65 @@ export async function fetchAllReflections(userId) {
 }
 
 /**
- * Fetches the most recent reflection for a period type (spec: week | month | quarter | year).
- * Prefers rows with content_json (new spec); falls back to legacy reflection_encrypted.
+ * Lists available reflection periods for a user and period type (for the "which week/month" dropdown).
+ * Returns [{ period_start, period_end, label }] ordered by period_end desc, up to 24 items.
  */
-export async function getReflection(userId, periodType) {
+export async function fetchReflectionPeriods(userId, periodType) {
   const periodLegacy = periodType === "year" ? "all" : periodType;
   const { data, error } = await supabase
+    .from("reflections")
+    .select("period_start, period_end, content_json")
+    .eq("user_id", userId)
+    .or(`period_type.eq.${periodType},and(period_type.is.null,period.eq.${periodLegacy})`)
+    .not("content_json", "is", null)
+    .order("period_end", { ascending: false })
+    .limit(24);
+
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
+
+  const mo = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return data.map((row) => {
+    const start = row.period_start;
+    const end = row.period_end;
+    let label = "";
+    if (periodType === "week" && start && end) {
+      const s = new Date(start + "T12:00:00");
+      const e = new Date(end + "T12:00:00");
+      label = `${mo[s.getMonth()]} ${s.getDate()}–${e.getDate()}, ${e.getFullYear()}`;
+    } else if (periodType === "month" && start) {
+      const d = new Date(start + "T12:00:00");
+      label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    } else if (periodType === "quarter" && start && end) {
+      const s = new Date(start + "T12:00:00");
+      const e = new Date(end + "T12:00:00");
+      label = `Q${Math.floor(s.getMonth() / 3) + 1} ${s.getFullYear()}`;
+    } else if (periodType === "year" && start) {
+      label = new Date(start + "T12:00:00").getFullYear().toString();
+    } else {
+      label = start && end ? `${start} – ${end}` : "—";
+    }
+    return { period_start: start, period_end: end, label };
+  });
+}
+
+/**
+ * Fetches a reflection: either the most recent for periodType, or a specific period when periodStart is given.
+ * Prefers rows with content_json (new spec); falls back to legacy reflection_encrypted.
+ */
+export async function getReflection(userId, periodType, periodStart = null) {
+  const periodLegacy = periodType === "year" ? "all" : periodType;
+  let query = supabase
     .from("reflections")
     .select("*")
     .eq("user_id", userId)
     .or(`period_type.eq.${periodType},and(period_type.is.null,period.eq.${periodLegacy})`)
-    .order("period_end", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("period_end", { ascending: false });
+
+  if (periodStart) {
+    query = query.eq("period_start", periodStart);
+  }
+  const { data, error } = await query.limit(1).maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
@@ -1333,6 +1379,32 @@ export async function updateUsageLimit(id, fields) {
   const { data, error } = await supabase
     .from("usage_limits")
     .update(fields)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Admin: Email templates (cron emails — letter_open, weekly_reflection)
+// ---------------------------------------------------------------------------
+
+export async function fetchEmailTemplates() {
+  const { data, error } = await supabase
+    .from("email_templates")
+    .select("*")
+    .order("id");
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateEmailTemplate(id, fields) {
+  const { data, error } = await supabase
+    .from("email_templates")
+    .update({ ...fields, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select()
     .single();

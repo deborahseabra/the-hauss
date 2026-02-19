@@ -352,13 +352,23 @@ async function generateReflectionFromSummaries(
   return content;
 }
 
-let weeklyReflectionTemplate: string | null = null;
+let weeklyReflectionTemplateFile: string | null = null;
 
-async function loadWeeklyReflectionTemplate(): Promise<string> {
-  if (weeklyReflectionTemplate) return weeklyReflectionTemplate;
+async function loadWeeklyReflectionTemplateFromFile(): Promise<string> {
+  if (weeklyReflectionTemplateFile) return weeklyReflectionTemplateFile;
   const path = new URL("./email-weekly-reflection.html", import.meta.url);
-  weeklyReflectionTemplate = await Deno.readTextFile(path);
-  return weeklyReflectionTemplate;
+  weeklyReflectionTemplateFile = await Deno.readTextFile(path);
+  return weeklyReflectionTemplateFile;
+}
+
+async function getWeeklyReflectionTemplate(supabase: ReturnType<typeof createClient>): Promise<string> {
+  const { data } = await supabase.from("email_templates").select("html_content").eq("id", "weekly_reflection").maybeSingle();
+  if (data?.html_content && String(data.html_content).trim()) return String(data.html_content);
+  try {
+    return await loadWeeklyReflectionTemplateFromFile();
+  } catch {
+    return "";
+  }
 }
 
 async function sendWeeklyReflectionEmail(
@@ -376,17 +386,13 @@ async function sendWeeklyReflectionEmail(
   const excerptHtml = excerptPlain.replace(/\n/g, "<br>");
   const appUrl = Deno.env.get("APP_URL") || "https://thehauss.me";
 
-  let html: string;
-  try {
-    const template = await loadWeeklyReflectionTemplate();
-    html = template
-      .replace(/\{\{title\}\}/g, title)
-      .replace(/\{\{excerpt\}\}/g, excerptHtml)
-      .replace(/\{\{app_url\}\}/g, appUrl);
-  } catch (e) {
-    console.error("Failed to load email template, using fallback:", e);
-    html = `<p><strong>${title}</strong></p><p>${excerptHtml}</p><p><a href="${appUrl}/#/reflections">Read your full reflection →</a></p>`;
-  }
+  const template = await getWeeklyReflectionTemplate(supabase);
+  const html = template
+    ? template
+        .replace(/\{\{title\}\}/g, title)
+        .replace(/\{\{excerpt\}\}/g, excerptHtml)
+        .replace(/\{\{app_url\}\}/g, appUrl)
+    : `<p><strong>${title}</strong></p><p>${excerptHtml}</p><p><a href="${appUrl}/#/reflections">Read your full reflection →</a></p>`;
 
   try {
     await fetch("https://api.resend.com/emails", {

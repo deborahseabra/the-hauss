@@ -20,13 +20,23 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
-let letterOpenTemplate: string | null = null;
+let letterOpenTemplateFile: string | null = null;
 
-async function loadLetterOpenTemplate(): Promise<string> {
-  if (letterOpenTemplate) return letterOpenTemplate;
+async function loadLetterOpenTemplateFromFile(): Promise<string> {
+  if (letterOpenTemplateFile) return letterOpenTemplateFile;
   const path = new URL("./email-letter-open.html", import.meta.url);
-  letterOpenTemplate = await Deno.readTextFile(path);
-  return letterOpenTemplate;
+  letterOpenTemplateFile = await Deno.readTextFile(path);
+  return letterOpenTemplateFile;
+}
+
+async function getLetterOpenTemplate(supabase: ReturnType<typeof createClient>): Promise<string> {
+  const { data } = await supabase.from("email_templates").select("html_content").eq("id", "letter_open").maybeSingle();
+  if (data?.html_content && String(data.html_content).trim()) return String(data.html_content);
+  try {
+    return await loadLetterOpenTemplateFromFile();
+  } catch {
+    return "";
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -92,13 +102,12 @@ Deno.serve(async (req: Request) => {
             ? "on " + writtenAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
             : "to yourself";
           let html: string;
-          try {
-            const template = await loadLetterOpenTemplate();
+          const template = await getLetterOpenTemplate(supabase);
+          if (template) {
             html = template
               .replace(/\{\{letter_url\}\}/g, letterUrl)
               .replace(/\{\{letter_written_date\}\}/g, letterWrittenDate);
-          } catch (e) {
-            console.error("Failed to load letter-open email template, using fallback:", e);
+          } else {
             html = `<p>Hi,</p><p>A letter you wrote ${letterWrittenDate} has just opened.</p><p><a href="${letterUrl}">Open your letter</a></p>`;
           }
           const res = await fetch("https://api.resend.com/emails", {
