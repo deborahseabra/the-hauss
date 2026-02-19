@@ -1091,6 +1091,78 @@ export async function fetchAllReflections(userId) {
   return results;
 }
 
+/**
+ * Fetches the most recent reflection for a period type (spec: week | month | quarter | year).
+ * Prefers rows with content_json (new spec); falls back to legacy reflection_encrypted.
+ */
+export async function getReflection(userId, periodType) {
+  const periodLegacy = periodType === "year" ? "all" : periodType;
+  const { data, error } = await supabase
+    .from("reflections")
+    .select("*")
+    .eq("user_id", userId)
+    .or(`period_type.eq.${periodType},and(period_type.is.null,period.eq.${periodLegacy})`)
+    .order("period_end", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  if (data.content_json && typeof data.content_json === "object") {
+    return mapContentJsonToReflection(data.content_json, periodType, data.period_start, data.period_end);
+  }
+
+  return fetchReflection(userId, periodLegacy);
+}
+
+function mapContentJsonToReflection(content, periodType, periodStart, periodEnd) {
+  const periodLabels = { week: "This Week", month: "This Month", quarter: "3 Months", year: "All Time" };
+  const r = content.reflection || {};
+  const text = r.text || "";
+  const themes = (content.themes || []).map((t) => ({
+    theme: t.name || t.theme,
+    count: t.count ?? 0,
+    trend: (t.trend === "up" ? "↑" : t.trend === "down" ? "↓" : t.trend === "new" ? "↑" : "—"),
+  }));
+  const mood = content.mood || {};
+  const moodData = (mood.data || []).map((d) => ({
+    day: d.label || "",
+    val: 3,
+    emoji: d.value || "🌤",
+  }));
+  const trend = moodData.map((m, i) => ({ w: m.day, v: m.val }));
+  const trendLabels = { week: "6-Week Trend", month: "6-Month Trend", quarter: "Quarterly Trend", year: "12-Month Trend" };
+  const dateStr = periodStart && periodEnd
+    ? formatWeekShort(periodStart, periodEnd) + (periodType === "month" ? ", " + new Date(periodEnd + "T12:00:00").getFullYear() : "")
+    : "";
+
+  return {
+    label: periodLabels[periodType] || periodType,
+    date: dateStr,
+    moods: moodData.length ? moodData : [{ day: "—", val: 3, emoji: "🌤" }],
+    trend: trend.length ? trend : [{ w: "—", v: 3 }],
+    trendLabel: trendLabels[periodType] || "Trend",
+    moodHint: mood.trend_label || "",
+    reflectionTitle: r.title || "Reflection",
+    reflection: text ? text.split("\n\n").filter(Boolean) : [],
+    connections: content.connections || [],
+    themes,
+    questions: [],
+    stats: [],
+  };
+}
+
+/**
+ * Returns ask_editor usage for the current user: { used, limit, allowed }.
+ * Call from frontend to show "X of Y this month" and lock when !allowed.
+ */
+export async function fetchAskEditorUsage() {
+  const { data, error } = await supabase.rpc("get_ask_editor_usage");
+  if (error) return { used: 0, limit: 0, allowed: false };
+  return data || { used: 0, limit: 0, allowed: false };
+}
+
 // ---------------------------------------------------------------------------
 // Write: Entries
 // ---------------------------------------------------------------------------
@@ -1243,6 +1315,33 @@ export async function updatePrompt(id, fields) {
 }
 
 // ---------------------------------------------------------------------------
+// Admin: Usage limits (Reflections / Ask Your Editor tiers)
+// ---------------------------------------------------------------------------
+
+export async function fetchUsageLimits() {
+  const { data, error } = await supabase
+    .from("usage_limits")
+    .select("*")
+    .order("role")
+    .order("feature");
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateUsageLimit(id, fields) {
+  const { data, error } = await supabase
+    .from("usage_limits")
+    .update(fields)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// ---------------------------------------------------------------------------
 // Attachments
 // ---------------------------------------------------------------------------
 
@@ -1329,6 +1428,31 @@ export async function markAllNotificationsRead(userId) {
 // ---------------------------------------------------------------------------
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+
+/**
+ * Ask Your Editor — sends question to Edge Function, returns { answer } or throws.
+ * On 403, throws with message and optional { used, limit, allowed } for UI.
+ */
+export async function submitAskEditorQuestion(session, question) {
+  const res = await fetch(`${supabaseUrl}/functions/v1/ask-your-editor`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session?.access_token}`,
+    },
+    body: JSON.stringify({ question: question?.trim() || "" }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json.error || "Ask Your Editor failed");
+    err.status = res.status;
+    err.used = json.used;
+    err.limit = json.limit;
+    err.allowed = json.allowed;
+    throw err;
+  }
+  return json;
+}
 
 export async function adminApi(session, action, params = {}) {
   const res = await fetch(`${supabaseUrl}/functions/v1/admin-api`, {

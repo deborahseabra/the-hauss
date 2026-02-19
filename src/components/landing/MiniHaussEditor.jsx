@@ -6,7 +6,7 @@ export default function MiniHaussEditor() {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
         <span style={{ color: C.accent, fontSize: 12 }}>✦</span>
-        <span style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.ink, textTransform: "uppercase", letterSpacing: "1px" }}>AI Editor</span>
+        <span style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.ink, textTransform: "uppercase", letterSpacing: "1px" }}>Editor</span>
       </div>
 
       {/* Mode buttons */}

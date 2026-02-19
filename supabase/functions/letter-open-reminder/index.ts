@@ -20,6 +20,15 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
+let letterOpenTemplate: string | null = null;
+
+async function loadLetterOpenTemplate(): Promise<string> {
+  if (letterOpenTemplate) return letterOpenTemplate;
+  const path = new URL("./email-letter-open.html", import.meta.url);
+  letterOpenTemplate = await Deno.readTextFile(path);
+  return letterOpenTemplate;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -38,7 +47,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: entries, error: entriesErr } = await supabase
     .from("entries")
-    .select("id, user_id, letter_open_at")
+    .select("id, user_id, letter_open_at, created_at")
     .eq("section", "letter")
     .not("letter_open_at", "is", null)
     .gte("letter_open_at", `${today}T00:00:00`)
@@ -76,6 +85,22 @@ Deno.serve(async (req: Request) => {
       const email = emailByUser.get(entry.user_id);
       if (email) {
         try {
+          const appUrl = Deno.env.get("APP_URL") || "https://thehauss.me";
+          const letterUrl = `${appUrl.replace(/\/$/, "")}/entry/${entry.id}`;
+          const writtenAt = entry.created_at ? new Date(entry.created_at) : null;
+          const letterWrittenDate = writtenAt
+            ? "on " + writtenAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+            : "to yourself";
+          let html: string;
+          try {
+            const template = await loadLetterOpenTemplate();
+            html = template
+              .replace(/\{\{letter_url\}\}/g, letterUrl)
+              .replace(/\{\{letter_written_date\}\}/g, letterWrittenDate);
+          } catch (e) {
+            console.error("Failed to load letter-open email template, using fallback:", e);
+            html = `<p>Hi,</p><p>A letter you wrote ${letterWrittenDate} has just opened.</p><p><a href="${letterUrl}">Open your letter</a></p>`;
+          }
           const res = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: {
@@ -86,7 +111,7 @@ Deno.serve(async (req: Request) => {
               from: Deno.env.get("RESEND_FROM") || "The Hauss <notifications@resend.dev>",
               to: [email],
               subject: "Your letter to yourself is ready to open",
-              html: `<p>Hi,</p><p>A letter you wrote to yourself has just opened.</p><p><a href="${Deno.env.get("APP_URL") || "https://thehauss.me"}">Open it in The Hauss</a></p>`,
+              html,
             }),
           });
           if (res.ok) emailsSent++;

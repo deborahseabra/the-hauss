@@ -201,7 +201,7 @@ export default function SampleEdition() {
                     </span>
                   )}
                   {TOP_STORIES[0].aiEdited && (
-                    <span style={{ fontFamily: F.sans, fontSize: 9, color: C.accent, display: "flex", alignItems: "center", gap: 3 }}>✦ AI</span>
+                    <span style={{ fontFamily: F.sans, fontSize: 9, color: C.accent, display: "flex", alignItems: "center", gap: 3 }}>✦ Editor</span>
                   )}
                 </div>
                 <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 700, lineHeight: 1.15, color: C.ink, marginBottom: 10 }}>{TOP_STORIES[0].headline}</h2>
@@ -259,7 +259,7 @@ export default function SampleEdition() {
                   <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
                   <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>{EDITORIAL.headline}</h3>
                   <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12, filter: "blur(2px)", userSelect: "none" }}>{EDITORIAL.content}</p>
-                  <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, filter: "blur(2px)" }}>— AI Editor</div>
+                  <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted, filter: "blur(2px)" }}>— Your Editor</div>
                 </div>
                 {/* Pro overlay */}
                 <div style={{

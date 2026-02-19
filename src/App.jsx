@@ -11,10 +11,14 @@ import {
   fetchSections,
   fetchAllReflections,
   fetchReflection,
+  getReflection,
+  fetchAskEditorUsage,
+  submitAskEditorQuestion,
   createEntry,
   updateEntry,
   fetchEntryFull,
   updateProfile,
+  fetchEntries,
   fetchEntriesFull,
   fetchEditionEntriesFull,
   ARTICLE_SECTION_LABELS,
@@ -27,6 +31,8 @@ import {
   markAllNotificationsRead,
   fetchPrompts,
   updatePrompt,
+  fetchUsageLimits,
+  updateUsageLimit,
   uploadAttachment,
   createAttachments,
   adminApi,
@@ -157,7 +163,7 @@ function AiEditor({ text, C, onApply, session }) {
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
           <span style={{ color: C.accent, fontSize: 16 }}>✦</span>
-          <span style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 600, color: C.ink, textTransform: "uppercase", letterSpacing: "1px" }}>AI Editor</span>
+          <span style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 600, color: C.ink, textTransform: "uppercase", letterSpacing: "1px" }}>Editor</span>
         </div>
         {aiError && (
           <div style={{ fontFamily: F.sans, fontSize: 11, color: "#c41e1e", marginBottom: 12, padding: "8px 12px", backgroundColor: "#fef5f5", border: "1px solid #f5d5d5" }}>
@@ -717,7 +723,7 @@ function EditorView({ onClose, onPublished, C, userId, session, initialEntry }) 
                   <button
                     onClick={handleSuggestHeadline}
                     disabled={headlineLoading}
-                    title="Suggest headline with AI"
+                    title="Suggest headline"
                     style={{
                       position: "absolute", top: "50%", right: 0, transform: "translateY(-50%)",
                       background: "none", border: "none", cursor: headlineLoading ? "default" : "pointer",
@@ -2329,7 +2335,7 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
                 {/* Editor's Note */}
                 <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink, marginBottom: 4, marginTop: 8 }}>Editor's Note</h3>
                 <p style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginBottom: 8 }}>
-                  Write your own or let AI summarize.
+                  Write your own or let your editor summarize.
                 </p>
                 <textarea
                   value={editorial}
@@ -2352,7 +2358,7 @@ function EditionBuilder({ C, userId, session, onClose, onCreated }) {
                     background: "none", border: `1px solid ${generatingAI ? C.rule : C.accent}`,
                     padding: "6px 14px", cursor: generatingAI ? "default" : "pointer",
                   }}
-                >{generatingAI ? "Generating..." : "✦ Generate with AI"}</button>
+                >{generatingAI ? "Generating..." : "✦ Generate"}</button>
               </div>
             </div>
 
@@ -2897,266 +2903,176 @@ function SectionsView({ C, userId, onOpenArticle }) {
 // ============================================================
 // REFLECTIONS VIEW — NYT distributed grid layout
 // ============================================================
-function ReflectionsView({ C, userId }) {
+const REFLECTION_PERIODS = [{ key: "week", label: "Week" }, { key: "month", label: "Month" }, { key: "quarter", label: "Quarter" }, { key: "year", label: "Year" }];
+
+const SAMPLE_REFLECTION = {
+  label: "This Week", date: "Feb 10 – 16, 2026",
+  moods: [{ day: "Mon", val: 2, emoji: "🌧" }, { day: "Tue", val: 3, emoji: "🌤" }, { day: "Wed", val: 3, emoji: "🌤" }, { day: "Thu", val: 4, emoji: "☀️" }, { day: "Fri", val: 4, emoji: "☀️" }, { day: "Sat", val: 5, emoji: "⚡" }, { day: "Sun", val: 4, emoji: "☀️" }],
+  trend: [{ w: "Mon", v: 2 }, { w: "", v: 2.5 }, { w: "", v: 3 }, { w: "", v: 3.5 }, { w: "Sun", v: 4 }], trendLabel: "6-Week Trend", moodHint: "A clear arc of growth across your selected period",
+  reflectionTitle: "This was a week of inflection.",
+  reflection: ["Your language shifted from observing to deciding. The recurring word was permission — it appeared in three entries, always in the context of allowing yourself something you'd been denying.", "You wrote more at night this week, and the night entries carried a different weight: slower, more honest, less performed."],
+  connections: ["You mention Marina in 3 entries, always when something in your own life is shifting. She might be your mirror for change.", "Night entries (after 10 PM) are 40% longer than morning ones. Your most honest writing happens when the city is quiet.", "Food appears in 4 entries this week — cooking is how you process decisions before you're ready to name them."],
+  themes: [{ theme: "Transformation", count: 28, trend: "↑" }, { theme: "Self-trust", count: 22, trend: "↑" }, { theme: "Permission", count: 18, trend: "↑" }],
+  questions: [], stats: [{ label: "Entries", value: "12" }, { label: "Words", value: "2,840" }, { label: "Days", value: "7" }, { label: "Avg. per entry", value: "237" }, { label: "Personal Essays", value: "3" }, { label: "Public", value: "1" }],
+};
+
+function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
   const [period, setPeriod] = useState("week");
   const [askQuery, setAskQuery] = useState("");
   const [askAnswer, setAskAnswer] = useState(null);
   const [askLoading, setAskLoading] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [customFrom, setCustomFrom] = useState("2025-12-01");
-  const [customTo, setCustomTo] = useState("2026-02-15");
-  const [customApplied, setCustomApplied] = useState(false);
-  const datePickerRef = useRef(null);
-  const [periodsData, setPeriodsData] = useState({});
+  const [reflectionData, setReflectionData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [periodStats, setPeriodStats] = useState(null);
+  const [askUsage, setAskUsage] = useState({ used: 0, limit: 0, allowed: true });
+
+  const isReader = userRole === "reader";
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || isReader) {
+      setLoading(false);
+      setReflectionData(isReader ? SAMPLE_REFLECTION : null);
+      return;
+    }
     setLoading(true);
-    fetchAllReflections(userId)
-      .then(setPeriodsData)
-      .catch(console.error)
+    getReflection(userId, period)
+      .then(setReflectionData)
+      .catch(() => setReflectionData(null))
       .finally(() => setLoading(false));
-  }, [userId]);
+  }, [userId, period, isReader]);
 
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (datePickerRef.current && !datePickerRef.current.contains(e.target)) {
-        setShowDatePicker(false);
-      }
-    };
-    if (showDatePicker) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showDatePicker]);
+    if (!userId || isReader) return;
+    fetchAskEditorUsage().then(setAskUsage).catch(() => setAskUsage({ used: 0, limit: 0, allowed: false }));
+  }, [userId, isReader, askAnswer]);
 
-  const formatDateLabel = (from, to) => {
-    const f = new Date(from + "T12:00:00");
-    const t = new Date(to + "T12:00:00");
-    const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    const fd = `${mo[f.getMonth()]} ${f.getDate()}, ${f.getFullYear()}`;
-    const td = `${mo[t.getMonth()]} ${t.getDate()}, ${t.getFullYear()}`;
-    return `${fd} – ${td}`;
+  const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const getDateRangeForPeriod = () => {
+    const today = new Date();
+    if (period === "week") {
+      const dow = today.getDay();
+      const mondayOffset = dow === 0 ? -6 : 1 - dow;
+      const mon = new Date(today);
+      mon.setDate(today.getDate() + mondayOffset);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      return { from: toDateStr(mon), to: toDateStr(sun) };
+    }
+    if (period === "month") {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1);
+      const last = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      return { from: toDateStr(first), to: toDateStr(last) };
+    }
+    if (period === "quarter") {
+      const from = new Date(today);
+      from.setMonth(from.getMonth() - 3);
+      return { from: toDateStr(from), to: toDateStr(today) };
+    }
+    if (period === "year") return { from: "2000-01-01", to: toDateStr(today) };
+    return null;
   };
+  const periodRange = getDateRangeForPeriod();
+  const periodFrom = periodRange?.from ?? null;
+  const periodTo = periodRange?.to ?? null;
 
-  const daysBetween = (from, to) => {
-    const f = new Date(from + "T12:00:00");
-    const t = new Date(to + "T12:00:00");
-    return Math.max(1, Math.round((t - f) / (1000 * 60 * 60 * 24)));
-  };
+  useEffect(() => {
+    if (!userId || !periodFrom || !periodTo) {
+      setPeriodStats(null);
+      return;
+    }
+    const fromIso = periodFrom + "T00:00:00.000Z";
+    const toIso = periodTo + "T23:59:59.999Z";
+    setPeriodStats(null);
+    fetchEntries({ userId, from: fromIso, to: toIso })
+      .then((entries) => {
+        const words = entries.reduce((s, e) => s + (e.word_count || 0), 0);
+        const personalEssays = entries.filter((e) => e.section === "essay").length;
+        const publicCount = entries.filter((e) => e.is_public).length;
+        const days = Math.max(1, Math.round((new Date(periodTo + "T12:00:00") - new Date(periodFrom + "T12:00:00")) / 86400000));
+        setPeriodStats({
+          from: periodFrom,
+          to: periodTo,
+          entries: entries.length,
+          words,
+          days,
+          avg: entries.length ? Math.round(words / entries.length) : 0,
+          personalEssays,
+          public: publicCount,
+        });
+      })
+      .catch(() => setPeriodStats(null));
+  }, [userId, period, periodFrom, periodTo]);
 
-  // Custom period placeholder (when no DB reflection exists)
-  const customPeriod = {
-    label: "Custom", date: formatDateLabel(customFrom, customTo),
-    moods: [{day:"W1",val:2,emoji:"🌧"},{day:"W2",val:2,emoji:"🌙"},{day:"W3",val:3,emoji:"🌤"},{day:"W4",val:3,emoji:"🌤"},{day:"W5",val:4,emoji:"☀️"},{day:"W6",val:4,emoji:"☀️"},{day:"W7",val:5,emoji:"⚡"}],
-    trend: [{w:"Start",v:2.2},{w:"",v:2.5},{w:"",v:2.8},{w:"",v:3.1},{w:"",v:3.5},{w:"End",v:4.1}],
-    trendLabel: `${daysBetween(customFrom, customTo)}-Day Trend`, moodHint: "A clear arc of growth across your selected period",
-    reflectionTitle: "Your Custom Period",
-    reflection: [
-      `Across this ${daysBetween(customFrom, customTo)}-day window, your writing tells a story of transformation. The early entries are cautious and observational — you were still finding your footing. By the midpoint, something shifted. The sentences got shorter. The certainty grew.`,
-      "The most striking pattern in this range: your relationship with doubt changed. Early on, doubt was a barrier. Later, it became a companion — something you acknowledged and walked alongside rather than fought against.",
-      "Your AI editor noticed a vocabulary shift of 23% between the first and last weeks of this range. New words for old feelings. That's growth you can measure.",
-    ],
-    connections: [
-      "The first third of this range contains 60% of your 'I think' statements. The last third has almost none.",
-      "Your longest entries cluster in the middle of this period — the transition zone between hesitation and decision.",
-      "Telegram entries increased by 45% in the second half. You started trusting quick thoughts more.",
-      "The themes that opened this period are different from the ones that closed it. You arrived somewhere new.",
-    ],
-    themes: [{theme:"Transformation",count:28,trend:"↑"},{theme:"Self-trust",count:22,trend:"↑"},{theme:"Permission",count:18,trend:"↑"},{theme:"Career",count:15,trend:"↑"},{theme:"Relationships",count:12,trend:"—"}],
-    questions: [
-      "What made you choose this specific time range? What were you looking for?",
-      "The person who wrote the first entry in this range — would she recognize the person who wrote the last?",
-      "Your vocabulary changed 23%. What new words did you find, and what did they replace?",
-      "If this period were a chapter, what would you title it?",
-    ],
-    stats: [{label:"Entries",value:String(Math.round(daysBetween(customFrom, customTo) * 0.65))},{label:"Words",value:String((Math.round(daysBetween(customFrom, customTo) * 180)).toLocaleString())},{label:"Days",value:String(daysBetween(customFrom, customTo))},{label:"Avg. per entry",value:"277"},{label:"Personal Essays",value:String(Math.round(daysBetween(customFrom, customTo) * 0.12))},{label:"Public",value:String(Math.round(daysBetween(customFrom, customTo) * 0.06))}],
-  };
-
-  const P = period === "custom" ? customPeriod : periodsData[period];
+  const P = reflectionData;
 
   if (loading) return <LoadingBlock C={C} text="Loading reflections..." />;
-  if (!P) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", animation: "fadeIn 0.3s ease" }}>
-      <span style={{ fontFamily: F.sans, fontSize: 13, color: C.inkMuted }}>No reflection data for this period</span>
-    </div>
-  );
 
-  const handleAsk = () => {
-    if (!askQuery.trim()) return;
-    setAskLoading(true); setAskAnswer(null);
-    setTimeout(() => {
-      const q = askQuery.toLowerCase();
-      let a = "Based on your 847 entries, this is a recurring pattern. You tend to circle back to this theme in moments of transition — especially in your dispatches and letters to self. The answers are emerging in your writing, even when they don't feel like answers yet.";
-      if (q.includes("happy") || q.includes("feliz") || q.includes("mood") || q.includes("humor"))
-        a = "Your happiest entries cluster around Thursdays and Sundays — days of breakthroughs or quiet mornings. Your joy comes less from events and more from moments of clarity. Feb 12 (the retention model breakthrough) and Feb 15 (reading Clarice) scored highest in emotional intensity this week. Interestingly, your happiest entries are never about happiness — they're about understanding.";
-      else if (q.includes("marina"))
-        a = "Marina appears in 8 entries across 3 months. She's never the subject — she's always the mirror. You mention her when your own life is shifting. The Lisbon announcement triggered your most emotionally complex entry this month (Feb 14, 12:15 PM). You never write about Marina on days you write Letters to Self. Her friendship seems to represent the version of certainty you're still reaching for.";
-      else if (q.includes("cook") || q.includes("food") || q.includes("comida") || q.includes("cozin"))
-        a = "Food appears in 42 entries, but it's almost never just about food. The stroganoff disaster (Feb 13) was about perfectionism. The lunch on Augusta (Feb 14) was about a friendship in transition. Your cooking entries are 60% more likely to precede a deeply reflective entry the next day. Food is your gateway to introspection — the act of making something with your hands seems to unlock something in your thinking.";
-      else if (q.includes("escrev") || q.includes("writ") || q.includes("produt"))
-        a = "Your most productive window is 10PM–midnight (73% of personal essays). Telegram entries average 89 words but score higher in emotional density. App entries average 340 words and are more structured. Your 12-day streak is your longest since launch. You write more on rainy days. Your word count doubles in weeks where you also cook.";
-      else if (q.includes("medo") || q.includes("fear") || q.includes("afraid"))
-        a = "Fear shows up in 19 entries, but its shape has changed over time. In the early editions, fear was paralyzing — 'I don't know if I can.' By January, it became a companion — 'I'm afraid and I'm doing it anyway.' Your Letters to Self contain the most fear, but also the most resolution. The entry 'To the Version of Me Who's Still Afraid' marked a turning point.";
-      else if (q.includes("são paulo") || q.includes("sao paulo") || q.includes("cidade") || q.includes("city"))
-        a = "São Paulo appears in 34 entries — not as a setting, but as a character. The city's sounds (7am gate opening, Pinheiros dogs), its light (golden hour obsession, 12 entries about light), and its rhythms shape your writing. Your most place-specific entries are your most grounded emotionally. When you write about the city, you write about belonging.";
-      setAskAnswer(a); setAskLoading(false);
-    }, 2200);
+  // Empty state for editor/publisher: no reflection yet for this period
+  const nextRunLabel = { week: "Sunday", month: "the 1st of next month", quarter: "the start of next quarter", year: "January 1st" };
+  if (!P) {
+    return (
+      <div style={{ animation: "fadeIn 0.4s ease" }}>
+        <div style={{ padding: "32px 0 0", textAlign: "center" }}>
+          <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 8 }}>✦ Reflections</div>
+          <h2 style={{ fontFamily: F.display, fontSize: 26, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Notes from your Editor</h2>
+          <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>Patterns, connections, and notes drawn from your writing.</p>
+          <div style={{ display: "flex", justifyContent: "center", gap: 0, flexWrap: "wrap", marginBottom: 24 }}>
+            {REFLECTION_PERIODS.map((p) => (
+              <button key={p.key} onClick={() => setPeriod(p.key)} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: period === p.key ? 500 : 400, color: period === p.key ? C.bg : C.inkMuted, backgroundColor: period === p.key ? C.ink : "transparent", border: `1px solid ${period === p.key ? C.ink : C.rule}`, padding: "6px 16px", cursor: "pointer", marginLeft: -1 }}>{p.label}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 24px", textAlign: "center" }}>
+          <p style={{ fontFamily: F.body, fontSize: 14, color: C.inkMuted }}>Your first {period === "week" ? "weekly" : period === "month" ? "monthly" : period === "quarter" ? "quarterly" : "yearly"} reflection will be generated on {nextRunLabel[period]}.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleAsk = async () => {
+    if (!askQuery.trim() || !session?.access_token) return;
+    setAskLoading(true);
+    setAskAnswer(null);
+    try {
+      const data = await submitAskEditorQuestion(session, askQuery.trim());
+      setAskAnswer(data.answer ?? "");
+      fetchAskEditorUsage().then(setAskUsage).catch(() => {});
+    } catch (err) {
+      if (err.status === 403 && (err.used !== undefined || err.limit !== undefined)) {
+        setAskUsage((prev) => ({ ...prev, used: err.used ?? prev.used, limit: err.limit ?? prev.limit, allowed: false }));
+      }
+      setAskAnswer(err.message || "Something went wrong. Try again.");
+    } finally {
+      setAskLoading(false);
+    }
   };
 
   return (
-    <div style={{ animation: "fadeIn 0.4s ease" }}>
-      {/* Header */}
+    <div style={{ animation: "fadeIn 0.4s ease", position: "relative" }}>
+      {/* Header + 4 period buttons */}
       <div style={{ padding: "32px 0 0", textAlign: "center" }}>
         <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "2px", marginBottom: 8 }}>✦ Reflections</div>
-        <h2 style={{ fontFamily: F.display, fontSize: 26, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Your AI Editor Speaks</h2>
-        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>{P.date}</p>
-        {/* Period selector */}
-        <div style={{ display: "flex", justifyContent: "center", gap: 0, marginBottom: 0 }}>
-          {[
-            { key: "week", label: "This Week" },
-            { key: "month", label: "This Month" },
-            { key: "quarter", label: "3 Months" },
-            { key: "all", label: "All Time" },
-          ].map((p) => (
-            <button key={p.key} onClick={() => { setPeriod(p.key); setAskAnswer(null); setAskQuery(""); setShowDatePicker(false); }} style={{
-              fontFamily: F.sans, fontSize: 11, fontWeight: period === p.key ? 500 : 400,
-              color: period === p.key ? C.bg : C.inkMuted,
-              backgroundColor: period === p.key ? C.ink : "transparent",
-              border: `1px solid ${period === p.key ? C.ink : C.rule}`,
-              padding: "6px 16px", cursor: "pointer", marginLeft: -1,
-            }}>{p.label}</button>
+        <h2 style={{ fontFamily: F.display, fontSize: 26, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Notes from your Editor</h2>
+        <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 16 }}>Patterns, connections, and notes drawn from your writing. Choose a period to see what your editor noticed.</p>
+        <div style={{ display: "flex", justifyContent: "center", gap: 0, flexWrap: "wrap", marginBottom: 0 }}>
+          {REFLECTION_PERIODS.map((p) => (
+            <button key={p.key} onClick={() => { if (!isReader) { setPeriod(p.key); setAskAnswer(null); setAskQuery(""); } }} disabled={isReader} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: period === p.key ? 500 : 400, color: period === p.key ? C.bg : C.inkMuted, backgroundColor: period === p.key ? C.ink : "transparent", border: `1px solid ${period === p.key ? C.ink : C.rule}`, padding: "6px 16px", cursor: isReader ? "default" : "pointer", marginLeft: -1, opacity: isReader ? 0.4 : 1 }}>{p.label}</button>
           ))}
-          {/* Custom date button */}
-          <div style={{ position: "relative" }} ref={datePickerRef}>
-            <button onClick={() => {
-              if (period === "custom" && customApplied) {
-                setShowDatePicker(!showDatePicker);
-              } else {
-                setShowDatePicker(!showDatePicker);
-              }
-            }} style={{
-              fontFamily: F.sans, fontSize: 11, fontWeight: period === "custom" ? 500 : 400,
-              color: period === "custom" ? C.bg : C.inkMuted,
-              backgroundColor: period === "custom" ? C.ink : "transparent",
-              border: `1px solid ${period === "custom" ? C.ink : C.rule}`,
-              padding: "6px 16px", cursor: "pointer", marginLeft: -1,
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>
-              </svg>
-              {period === "custom" && customApplied ? "Custom" : "Custom"}
-            </button>
-
-            {/* Date picker dropdown */}
-            {showDatePicker && (
-              <div style={{
-                position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 100,
-                backgroundColor: C.surface, border: `1px solid ${C.rule}`,
-                boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
-                padding: 0, minWidth: 300,
-                animation: "fadeIn 0.2s ease",
-              }}>
-                {/* Header */}
-                <div style={{ padding: "14px 18px 10px", borderBottom: `1px solid ${C.rule}` }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                    <span style={{ color: C.accent, fontSize: 12 }}>✦</span>
-                    <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>Custom Range</span>
-                  </div>
-                  <p style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, lineHeight: 1.4 }}>
-                    Select a date range to analyze your writing
-                  </p>
-                </div>
-
-                {/* Date inputs */}
-                <div style={{ padding: "16px 18px" }}>
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>From</label>
-                    <input
-                      type="date"
-                      value={customFrom}
-                      max={customTo}
-                      onChange={(e) => setCustomFrom(e.target.value)}
-                      style={{
-                        width: "100%", padding: "9px 12px",
-                        fontFamily: F.sans, fontSize: 13, color: C.ink,
-                        backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`,
-                        outline: "none", cursor: "pointer",
-                      }}
-                    />
-                  </div>
-                  <div style={{ marginBottom: 18 }}>
-                    <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>To</label>
-                    <input
-                      type="date"
-                      value={customTo}
-                      min={customFrom}
-                      onChange={(e) => setCustomTo(e.target.value)}
-                      style={{
-                        width: "100%", padding: "9px 12px",
-                        fontFamily: F.sans, fontSize: 13, color: C.ink,
-                        backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`,
-                        outline: "none", cursor: "pointer",
-                      }}
-                    />
-                  </div>
-
-                  {/* Quick presets */}
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontFamily: F.sans, fontSize: 9, fontWeight: 600, color: C.inkFaint, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Quick Ranges</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {[
-                        { label: "Last 7 days", from: "2026-02-09", to: "2026-02-15" },
-                        { label: "Last 30 days", from: "2026-01-17", to: "2026-02-15" },
-                        { label: "Last 90 days", from: "2025-11-18", to: "2026-02-15" },
-                        { label: "This year", from: "2026-01-01", to: "2026-02-15" },
-                        { label: "Last year", from: "2025-01-01", to: "2025-12-31" },
-                        { label: "Dec–Feb", from: "2025-12-01", to: "2026-02-15" },
-                      ].map((preset, i) => (
-                        <button key={i} onClick={() => { setCustomFrom(preset.from); setCustomTo(preset.to); }} style={{
-                          fontFamily: F.sans, fontSize: 10, color: customFrom === preset.from && customTo === preset.to ? C.accent : C.inkMuted,
-                          backgroundColor: "transparent",
-                          border: `1px solid ${customFrom === preset.from && customTo === preset.to ? C.accent : C.rule}`,
-                          padding: "4px 10px", cursor: "pointer",
-                          transition: "border-color 0.15s",
-                        }}
-                          onMouseEnter={(e) => e.currentTarget.style.borderColor = C.ink}
-                          onMouseLeave={(e) => e.currentTarget.style.borderColor = (customFrom === preset.from && customTo === preset.to ? C.accent : C.rule)}
-                        >{preset.label}</button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Summary + Apply */}
-                  <div style={{ borderTop: `1px solid ${C.rule}`, paddingTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkMuted }}>{daysBetween(customFrom, customTo)} days selected</div>
-                    </div>
-                    <button onClick={() => {
-                      setPeriod("custom");
-                      setCustomApplied(true);
-                      setShowDatePicker(false);
-                      setAskAnswer(null);
-                      setAskQuery("");
-                    }} style={{
-                      fontFamily: F.sans, fontSize: 11, fontWeight: 500,
-                      color: C.bg, backgroundColor: C.ink,
-                      border: "none", padding: "8px 20px", cursor: "pointer",
-                      display: "flex", alignItems: "center", gap: 5,
-                    }}>
-                      <span style={{ color: C.accent, fontSize: 10 }}>✦</span>
-                      Analyze
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
+      {/* Reader overlay: blur + CTA */}
+      {isReader && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.6)", zIndex: 10, pointerEvents: "none" }}>
+          <div style={{ textAlign: "center", padding: 24 }}>
+            <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink, marginBottom: 8 }}>Unlock Reflections with Editor</div>
+            <button style={{ fontFamily: F.sans, fontSize: 12, fontWeight: 600, color: C.bg, backgroundColor: C.ink, border: "none", padding: "10px 20px", cursor: "pointer", pointerEvents: "auto" }}>Unlock Reflections with Editor →</button>
+          </div>
+        </div>
+      )}
+
       {/* ===== MAIN GRID: primary (wide) + sidebar (narrow) ===== */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 300px", gap: 0, borderTop: `2px solid ${C.ink}`, paddingTop: 20, marginTop: 16, animation: "fadeInUp 0.5s ease 0.1s both" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 300px", gap: 0, borderTop: `2px solid ${C.ink}`, paddingTop: 20, marginTop: 16, animation: "fadeInUp 0.5s ease 0.1s both", filter: isReader ? "blur(3px)" : "none", pointerEvents: isReader ? "none" : "auto" }}>
 
         {/* ===== PRIMARY COLUMN ===== */}
         <div style={{ paddingRight: 28 }}>
@@ -3170,13 +3086,13 @@ function ReflectionsView({ C, userId }) {
             {P.reflection.map((p, i) => (
               <p key={i} style={{ fontFamily: F.body, fontSize: 16, lineHeight: 1.8, color: C.inkLight, marginBottom: 10 }} dangerouslySetInnerHTML={{ __html: p }} />
             ))}
-            <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginTop: 10 }}>— Your AI Editor</div>
+            <div style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted, marginTop: 10 }}>— Your Editor</div>
           </div>
 
           <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 24 }} />
 
           {/* Connections */}
-          <div style={{ marginBottom: 24 }}>
+          <div style={{ backgroundColor: C.sectionBg, padding: "20px 20px", marginBottom: 24 }}>
             <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 14 }}>Connections You Might Not See</div>
             {P.connections.map((c, i) => (
               <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: i < P.connections.length - 1 ? `1px solid ${C.rule}` : "none" }}>
@@ -3188,48 +3104,39 @@ function ReflectionsView({ C, userId }) {
 
           <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 24 }} />
 
-          {/* Questions — grey bg */}
-          <div style={{ backgroundColor: C.sectionBg, padding: "20px 20px", marginBottom: 24 }}>
-            <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 14 }}>Questions From Your Editor</div>
-            {P.questions.map((q, i) => (
-              <div key={i} style={{
-                fontFamily: F.body, fontSize: 13, lineHeight: 1.6, color: C.inkLight,
-                padding: "10px 0", borderBottom: i < P.questions.length - 1 ? `1px solid ${C.rule}` : "none",
-              }}>{q}</div>
-            ))}
-          </div>
-
-          <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 24 }} />
-
-          {/* Ask Your Editor — interactive */}
+          {/* Ask Your Editor — limits by tier; Reader sees disabled CTA */}
           <div style={{ marginBottom: 40 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
               <span style={{ color: C.accent, fontSize: 14 }}>✦</span>
               <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>Ask Your Editor</span>
+              {!isReader && askUsage.limit >= 0 && (
+                <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkMuted, marginLeft: "auto" }}>{askUsage.used} of {askUsage.limit} this month</span>
+              )}
             </div>
             <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 14, lineHeight: 1.5 }}>
-              Ask anything about your writing, patterns, moods, or recurring themes. Your AI editor will search across all your entries.
+              {isReader ? "Ask anything about your writing — Editor feature." : "Ask anything about your writing, patterns, moods, or recurring themes. Your editor will search across all your entries."}
             </p>
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input
                 value={askQuery}
-                onChange={(e) => setAskQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAsk()}
-                placeholder="e.g. When am I happiest? What do I write about Marina?"
+                onChange={(e) => !isReader && askUsage.allowed && setAskQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !isReader && askUsage.allowed && handleAsk()}
+                placeholder={isReader ? "Ask anything about your writing — Editor feature" : (!askUsage.allowed ? (userRole === "editor" ? "Upgrade to Publisher for more questions →" : "Limit reached for this month") : "e.g. When am I happiest? What do I write about Marina?")}
+                disabled={isReader || !askUsage.allowed}
                 style={{
                   flex: 1, fontFamily: F.body, fontSize: 14, color: C.ink,
-                  backgroundColor: "transparent", border: `1px solid ${C.rule}`,
-                  padding: "10px 14px", outline: "none",
+                  backgroundColor: (isReader || !askUsage.allowed) ? C.sectionBg : "transparent", border: `1px solid ${C.rule}`,
+                  padding: "10px 14px", outline: "none", opacity: (isReader || !askUsage.allowed) ? 0.8 : 1,
                 }}
               />
               <button
                 onClick={handleAsk}
-                disabled={askLoading || !askQuery.trim()}
+                disabled={isReader || askLoading || !askQuery.trim() || !askUsage.allowed}
                 style={{
                   fontFamily: F.sans, fontSize: 11, fontWeight: 500,
-                  color: askQuery.trim() ? C.bg : C.inkFaint,
-                  backgroundColor: askQuery.trim() ? C.ink : C.rule,
-                  border: "none", padding: "10px 20px", cursor: askQuery.trim() ? "pointer" : "default",
+                  color: (askQuery.trim() && askUsage.allowed && !isReader) ? C.bg : C.inkFaint,
+                  backgroundColor: (askQuery.trim() && askUsage.allowed && !isReader) ? C.ink : C.rule,
+                  border: "none", padding: "10px 20px", cursor: (askQuery.trim() && askUsage.allowed && !isReader) ? "pointer" : "default",
                   display: "flex", alignItems: "center", gap: 6,
                 }}
               >
@@ -3241,11 +3148,12 @@ function ReflectionsView({ C, userId }) {
               </button>
             </div>
 
-            {/* Suggested questions */}
+            {!isReader && askUsage.allowed && (
+              <>
             {!askAnswer && !askLoading && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {["When am I happiest?", "Tell me about Marina", "How has my writing changed?", "What role does São Paulo play?"].map((sq, i) => (
-                  <button key={i} onClick={() => { setAskQuery(sq); }} style={{
+                  <button key={i} onClick={() => setAskQuery(sq)} style={{
                     fontFamily: F.sans, fontSize: 10, color: C.inkMuted,
                     backgroundColor: "transparent", border: `1px solid ${C.rule}`,
                     padding: "5px 10px", cursor: "pointer",
@@ -3254,17 +3162,13 @@ function ReflectionsView({ C, userId }) {
               </div>
             )}
 
-            {/* Loading state */}
             {askLoading && (
               <div style={{ padding: "20px 0", display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ display: "inline-block", animation: "spin 1.5s linear infinite", color: C.accent, fontSize: 14 }}>✦</span>
-                <span style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted }}>
-                  Searching across 847 entries...
-                </span>
+                <span style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted }}>Searching across your entries...</span>
               </div>
             )}
 
-            {/* Answer */}
             {askAnswer && (
               <div style={{ backgroundColor: C.sectionBg, padding: "20px 20px", animation: "fadeIn 0.4s ease" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
@@ -3277,6 +3181,8 @@ function ReflectionsView({ C, userId }) {
                   border: `1px solid ${C.rule}`, padding: "4px 12px", cursor: "pointer", marginTop: 12,
                 }}>Ask another question</button>
               </div>
+            )}
+              </>
             )}
           </div>
         </div>
@@ -3338,15 +3244,31 @@ function ReflectionsView({ C, userId }) {
 
           <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 20 }} />
 
-          {/* Stats */}
+          {/* Stats — always for the period selected in the dropdown */}
           <div style={{ marginBottom: 24 }}>
-            <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 12 }}>{P.label} in Numbers</div>
-            {P.stats.map((s, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: i < P.stats.length - 1 ? `1px solid ${C.rule}` : "none" }}>
-                <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{s.label}</span>
-                <span style={{ fontFamily: F.mono, fontSize: 11, color: C.ink }}>{s.value}</span>
-              </div>
-            ))}
+            <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 12 }}>By the numbers</div>
+            {periodStats && periodStats.from === periodFrom && periodStats.to === periodTo ? (
+              [
+                { label: "Entries", value: String(periodStats.entries) },
+                { label: "Words", value: periodStats.words.toLocaleString() },
+                { label: "Days", value: String(periodStats.days) },
+                { label: "Avg. per entry", value: String(periodStats.avg) },
+                { label: "Personal Essays", value: String(periodStats.personalEssays) },
+                { label: "Public", value: String(periodStats.public) },
+              ].map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: i < 5 ? `1px solid ${C.rule}` : "none" }}>
+                  <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{s.label}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 11, color: C.ink }}>{s.value}</span>
+                </div>
+              ))
+            ) : (
+              P.stats.map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: i < P.stats.length - 1 ? `1px solid ${C.rule}` : "none" }}>
+                  <span style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted }}>{s.label}</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 11, color: C.ink }}>{s.value}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -3468,6 +3390,7 @@ function AdminPage({ C, onClose, session }) {
   const TABS = [
     { id: "prompts", label: "Prompts" },
     { id: "users", label: "Users" },
+    { id: "limits", label: "Limits" },
     { id: "dashboard", label: "Dashboard" },
   ];
 
@@ -3512,6 +3435,7 @@ function AdminPage({ C, onClose, session }) {
         <div style={{ maxWidth: tab === "dashboard" ? 1000 : 800, margin: "0 auto" }}>
           {tab === "prompts" && <AdminPromptsTab C={C} setSaveMsg={setSaveMsg} />}
           {tab === "users" && <AdminUsersTab C={C} session={session} setSaveMsg={setSaveMsg} />}
+          {tab === "limits" && <AdminLimitsTab C={C} setSaveMsg={setSaveMsg} />}
           {tab === "dashboard" && <AdminDashboardTab C={C} session={session} />}
         </div>
       </div>
@@ -3575,9 +3499,9 @@ function AdminPromptsTab({ C, setSaveMsg }) {
 
   return (
     <>
-      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>AI Prompts</h1>
+      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Editor Prompts</h1>
       <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 32 }}>
-        Manage the system prompts used by the AI Editor. Changes take effect immediately.
+        Manage the system prompts used by the Editor. Changes take effect immediately.
       </p>
 
       {loading && <LoadingBlock C={C} text="Loading prompts..." />}
@@ -3638,6 +3562,11 @@ function AdminPromptsTab({ C, setSaveMsg }) {
                       border: `1px solid ${C.rule}`, outline: "none", resize: "vertical",
                     }}
                   />
+                  {(prompt.id === "reflections_from_entries" || prompt.id === "reflections_from_summaries") && (
+                    <p style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, marginTop: 8 }}>
+                      Variables: <code style={{ background: C.sectionBg, padding: "1px 4px" }}>{`{{period_label}}`}</code> is injected at runtime by the backend (e.g. “this week (Feb 9–15)”).
+                    </p>
+                  )}
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <div>
@@ -3943,6 +3872,136 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
           )}
         </>
       )}
+    </>
+  );
+}
+
+// ── Admin: Limits Tab (usage_limits — Ask Your Editor, AI edits, Reflections) ──
+function AdminLimitsTab({ C, setSaveMsg }) {
+  const [limits, setLimits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [editLimit, setEditLimit] = useState("");
+  const [editPeriod, setEditPeriod] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchUsageLimits()
+      .then(setLimits)
+      .catch((err) => console.error("Failed to load usage limits:", err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const startEdit = (row) => {
+    setEditingId(row.id);
+    setEditLimit(row.limit_value === -1 ? "" : String(row.limit_value));
+    setEditPeriod(row.period);
+    setSaveMsg(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditLimit("");
+    setEditPeriod("");
+    setSaveMsg(null);
+  };
+
+  const handleSave = async () => {
+    if (editingId == null) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const limitValue = editLimit === "" || editLimit === "-1" ? -1 : parseInt(editLimit, 10);
+      if (isNaN(limitValue) || limitValue < -1) {
+        setSaveMsg("Limit must be -1 (unlimited) or a non-negative number.");
+        return;
+      }
+      await updateUsageLimit(editingId, { limit_value: limitValue, period: editPeriod });
+      setLimits((prev) => prev.map((r) => (r.id === editingId ? { ...r, limit_value: limitValue, period: editPeriod } : r)));
+      setSaveMsg("Saved.");
+      setTimeout(() => setSaveMsg(null), 2000);
+      cancelEdit();
+    } catch (err) {
+      setSaveMsg("Error: " + (err.message || "Failed to save"));
+      setTimeout(() => setSaveMsg(null), 4000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ fontFamily: F.sans, fontSize: 13, color: C.inkMuted }}>Loading limits…</div>
+    );
+  }
+
+  const inputStyle = {
+    padding: "6px 10px", fontFamily: F.sans, fontSize: 12, color: C.ink,
+    backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none", width: 72,
+  };
+  const periodOptions = ["day", "week", "month"];
+
+  return (
+    <>
+      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Usage limits</h1>
+      <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkMuted, marginBottom: 24 }}>
+        Limits per role and feature. Use <strong>-1</strong> for unlimited. Changes apply immediately.
+      </p>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: F.sans, fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: `2px solid ${C.rule}` }}>
+              <th style={{ textAlign: "left", padding: "10px 12px", color: C.inkMuted, fontWeight: 600 }}>Role</th>
+              <th style={{ textAlign: "left", padding: "10px 12px", color: C.inkMuted, fontWeight: 600 }}>Feature</th>
+              <th style={{ textAlign: "left", padding: "10px 12px", color: C.inkMuted, fontWeight: 600 }}>Limit</th>
+              <th style={{ textAlign: "left", padding: "10px 12px", color: C.inkMuted, fontWeight: 600 }}>Period</th>
+              <th style={{ width: 80 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {limits.map((row) => (
+              <tr key={row.id} style={{ borderBottom: `1px solid ${C.rule}` }}>
+                <td style={{ padding: "10px 12px", color: C.ink }}>{row.role}</td>
+                <td style={{ padding: "10px 12px", color: C.ink }}>{row.feature}</td>
+                <td style={{ padding: "8px 12px" }}>
+                  {editingId === row.id ? (
+                    <input
+                      type="text"
+                      value={editLimit}
+                      onChange={(e) => setEditLimit(e.target.value)}
+                      placeholder="-1"
+                      style={inputStyle}
+                    />
+                  ) : (
+                    <span style={{ color: C.ink }}>{row.limit_value === -1 ? "Unlimited" : row.limit_value}</span>
+                  )}
+                </td>
+                <td style={{ padding: "8px 12px" }}>
+                  {editingId === row.id ? (
+                    <select value={editPeriod} onChange={(e) => setEditPeriod(e.target.value)} style={{ ...inputStyle, width: "auto", cursor: "pointer" }}>
+                      {periodOptions.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span style={{ color: C.ink }}>{row.period}</span>
+                  )}
+                </td>
+                <td style={{ padding: "8px 12px" }}>
+                  {editingId === row.id ? (
+                    <span style={{ display: "flex", gap: 8 }}>
+                      <button onClick={handleSave} disabled={saving} style={{ fontFamily: F.sans, fontSize: 11, padding: "4px 10px", background: C.ink, color: C.bg, border: "none", cursor: saving ? "default" : "pointer" }}>Save</button>
+                      <button onClick={cancelEdit} style={{ fontFamily: F.sans, fontSize: 11, padding: "4px 10px", background: "none", border: `1px solid ${C.rule}`, color: C.inkMuted, cursor: "pointer" }}>Cancel</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => startEdit(row)} style={{ fontFamily: F.sans, fontSize: 11, padding: "4px 10px", background: "none", border: `1px solid ${C.rule}`, color: C.inkMuted, cursor: "pointer" }}>Edit</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -5314,7 +5373,7 @@ export default function App() {
         ) : view === "sections" ? (
           <SectionsView C={C} userId={userId} onOpenArticle={openArticle} />
         ) : view === "reflections" ? (
-          <ReflectionsView C={C} userId={userId} />
+          <ReflectionsView C={C} userId={userId} userRole={user?.role} isAdmin={user?.role === "admin"} session={session} />
         ) : (
         <div>
         {editionLoading ? <LoadingBlock C={C} text="Loading edition..." /> : !editionData ? (
@@ -5504,7 +5563,7 @@ export default function App() {
               <span style={{ fontFamily: F.display, fontSize: 14, fontWeight: 600, color: C.ink, display: "block" }}>{pubName}</span>
               <span style={{ fontFamily: F.body, fontSize: 11, fontStyle: "italic", color: C.inkMuted }}>Powered by The Hauss</span>
             </div>
-            <div style={{ display: "flex", gap: 20 }}>{["Export", "Privacy", "Help"].map((l, i) => <span key={i} style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, cursor: "pointer" }}>{l}</span>)}</div>
+            <div style={{ display: "flex", gap: 20 }}>{["Privacy", "Help"].map((l, i) => <span key={i} style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, cursor: "pointer" }}>{l}</span>)}</div>
           </div>
         </footer>
       </div>
