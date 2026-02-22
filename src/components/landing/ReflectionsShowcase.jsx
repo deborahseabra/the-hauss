@@ -69,7 +69,7 @@ export default function ReflectionsShowcase() {
           <div style={{
             fontFamily: F.sans, fontSize: 11, color: C.inkFaint, marginTop: 6,
           }}>
-            Reader plan includes weekly reflections. Editor unlocks your full story.
+            Writer plan includes weekly reflections. Editor unlocks your full story.
           </div>
         </div>
       </div>

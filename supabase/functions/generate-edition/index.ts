@@ -203,6 +203,7 @@ async function generateForUser(
 
   let editorialBody =
     "A quiet week in the notebook. The stories are smaller, but the signal is clear: your attention is becoming more precise.";
+  let briefingObj: Record<string, string> = {};
   let featuredIds: string[] = entries.slice(0, 2).map((e) => e.id);
   let orderedIds: string[] = entries.map((e) => e.id);
 
@@ -228,6 +229,9 @@ async function generateForUser(
         })),
       });
       editorialBody = ai.editorial_body || editorialBody;
+      if (ai.briefing && typeof ai.briefing === "object") {
+        briefingObj = ai.briefing;
+      }
       if (Array.isArray(ai.featured_entry_ids)) {
         featuredIds = ai.featured_entry_ids.filter((id: string) =>
           entries.some((e) => e.id === id)
@@ -246,6 +250,9 @@ async function generateForUser(
   }
 
   const editorialEncrypted = await encryptText(editorialBody);
+  const briefingEncrypted = Object.keys(briefingObj).length > 0
+    ? await encryptText(JSON.stringify(briefingObj))
+    : null;
 
   const { data: userProfile } = await supabase
     .from("profiles")
@@ -269,6 +276,7 @@ async function generateForUser(
       entry_count: entryCount,
       word_count: wordCount,
       editorial_encrypted: editorialEncrypted,
+      briefing_encrypted: briefingEncrypted,
       publication_city: pubCity,
       publication_temperature: pubTemp,
     }, { onConflict: "user_id,week_start" })

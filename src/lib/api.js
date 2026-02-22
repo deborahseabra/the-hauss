@@ -182,6 +182,20 @@ export async function fetchProfile(userId) {
   return data;
 }
 
+export async function fetchReferralMe() {
+  const { data, error } = await supabase.rpc("referral_me");
+  if (error) throw error;
+  return data || { referral_code: null, referral_count: 0 };
+}
+
+export async function resolveReferralCode(code) {
+  const normalized = (code || "").trim().toLowerCase();
+  if (!normalized) return null;
+  const { data, error } = await supabase.rpc("referral_resolve", { code: normalized });
+  if (error) throw error;
+  return data || null;
+}
+
 // ---------------------------------------------------------------------------
 // Entries
 // ---------------------------------------------------------------------------
@@ -350,6 +364,13 @@ export async function fetchJournal({ userId, from, to }) {
 
 async function buildEditionViewData(edition, decryptedEntries, userId) {
   const editorial = await decryptOptional(edition.editorial_encrypted);
+  let aiBriefingMap = null;
+  if (edition.briefing_encrypted) {
+    try {
+      const raw = await decryptOptional(edition.briefing_encrypted);
+      if (raw) aiBriefingMap = JSON.parse(raw);
+    } catch (_) { /* fallback to body truncation */ }
+  }
   const entryIds = decryptedEntries.map((ee) => ee.entry.id);
   const { data: aiEdits } = await supabase
     .from("ai_edits")
@@ -360,12 +381,19 @@ async function buildEditionViewData(edition, decryptedEntries, userId) {
 
   const topStories = decryptedEntries.map((ee) => {
     const e = ee.entry;
+    const firstPhoto = (e.attachments || []).find((a) => a.type === "photo");
+    let firstImageUrl = firstPhoto?.url || null;
+    if (!firstImageUrl && e.body) {
+      const imgMatch = e.body.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (imgMatch) firstImageUrl = imgMatch[1];
+    }
     return {
       id: e.id,
       section: SECTION_UPPER[e.section] || e.section.toUpperCase(),
       headline: e.title || stripHtmlTags(e.body).slice(0, 60) + "...",
-      subhead: e.title ? stripHtmlTags(e.body).slice(0, 120) + (stripHtmlTags(e.body).length > 120 ? "..." : "") : "",
+      subhead: (e.subhead && String(e.subhead).trim()) ? String(e.subhead).trim() : "",
       excerpt: e.body,
+      firstImageUrl,
       readTime: estimateReadTime(e.word_count),
       date: formatDate(e.created_at),
       source: e.source,
@@ -377,19 +405,19 @@ async function buildEditionViewData(edition, decryptedEntries, userId) {
 
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const briefingMap = {};
+  const fallbackBriefingMap = {};
   for (const ee of decryptedEntries) {
     const d = new Date(ee.entry.created_at);
     const dayName = dayNames[d.getDay()];
-    if (!briefingMap[dayName]) {
+    if (!fallbackBriefingMap[dayName]) {
       const body = ee.entry.body;
       const plainBody = stripHtmlTags(body);
-      briefingMap[dayName] = plainBody.length > 80 ? plainBody.slice(0, 77) + "..." : plainBody;
+      fallbackBriefingMap[dayName] = plainBody.length > 80 ? plainBody.slice(0, 77) + "..." : plainBody;
     }
   }
   const briefing = weekDays.map((day) => ({
     day,
-    note: briefingMap[day] || "No entry this day.",
+    note: (aiBriefingMap && aiBriefingMap[day]) ? aiBriefingMap[day] : (fallbackBriefingMap[day] || "No entry this day."),
   }));
 
   const sectionCounts = {};
@@ -460,7 +488,7 @@ async function buildEditionViewData(edition, decryptedEntries, userId) {
 async function fetchEditionRaw(userId, edition) {
   const { data: edEntries, error: eeError } = await supabase
     .from("edition_entries")
-    .select("*, entry:entries(*)")
+    .select("*, entry:entries(*, attachments(type, url, metadata))")
     .eq("edition_id", edition.id)
     .order("display_order", { ascending: true });
 
@@ -567,7 +595,7 @@ export async function fetchPublicEdition(editionId) {
   if (mode === "full") {
     const { data: edEntries, error: eeError } = await supabase
       .from("edition_entries")
-      .select("*, entry:entries(*)")
+      .select("*, entry:entries(*, attachments(type, url, metadata))")
       .eq("edition_id", edition.id)
       .order("display_order", { ascending: true });
     if (eeError) throw eeError;

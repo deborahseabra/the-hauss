@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
 import CityField from "./components/CityField";
+import { resolveReferralCode } from "./lib/api";
 
 const F = {
   display: "'Playfair Display', Georgia, serif",
@@ -33,13 +34,30 @@ export default function AuthPage({ onAuth }) {
     setError(null);
     if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     setLoading(true);
+    let referredById = null;
+    try {
+      const refCode = localStorage.getItem("hauss_ref");
+      if (refCode) {
+        referredById = await resolveReferralCode(refCode);
+      }
+    } catch (err) {
+      // Referral resolution is best-effort; signup should still proceed.
+      console.error("Referral resolve failed:", err);
+    }
+
+    const metadata = {
+      name: name || email.split("@")[0],
+      city: city || null,
+      ...(referredById ? { referred_by_id: referredById } : {}),
+    };
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name: name || email.split("@")[0], city: city || null } },
+      options: { data: metadata },
     });
     setLoading(false);
     if (error) { setError(error.message); return; }
+    localStorage.removeItem("hauss_ref");
     setMode("check-email");
   };
 

@@ -48,6 +48,7 @@ import {
   createCustomEdition,
   fetchEditionLinks,
   fetchCityWeather,
+  fetchReferralMe,
 } from "./lib/api";
 import { hasAccess, ROLE_LABELS, ROLE_BADGE_STYLES } from "./lib/access";
 import CityField from "./components/CityField";
@@ -1005,10 +1006,10 @@ function SettingsPanel({ isOpen, onClose, C, mode, setMode, accent, setAccent, u
           <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 16 }}>Plan</div>
           <div style={{ border: `1px solid ${C.rule}`, padding: 20 }}>
             {(() => {
-              const role = profile?.role || "reader";
+              const role = profile?.role || "writer";
               const label = role.charAt(0).toUpperCase() + role.slice(1);
-              const desc = role === "reader" ? "30 entries/month · Basic editing" : role === "editor" ? "Unlimited entries · Advanced editing · Editions" : role === "publisher" ? "Everything in editor · PDF export · Public page" : "Full platform access";
-              const nextLevel = role === "reader" ? "Editor" : role === "editor" ? "Publisher" : null;
+              const desc = role === "writer" ? "30 entries/month · Basic editing" : role === "editor" ? "Unlimited entries · Advanced editing · Editions" : role === "publisher" ? "Everything in editor · PDF export · Public page" : "Full platform access";
+              const nextLevel = role === "writer" ? "Editor" : role === "editor" ? "Publisher" : null;
               const canUpgrade = nextLevel !== null;
               return (
                 <>
@@ -1217,9 +1218,72 @@ function ProfilePanel({ isOpen, onClose, C, userId, profile, onSaved, uploadAtta
 }
 
 // ============================================================
+// REFERRAL PANEL (Invite a friend — from header menu)
+// ============================================================
+function ReferralPanel({ isOpen, onClose, C, userId }) {
+  const [referralCode, setReferralCode] = useState(null);
+  const [referralCount, setReferralCount] = useState(0);
+  const [refCopyOk, setRefCopyOk] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !userId) return;
+    fetchReferralMe()
+      .then((data) => {
+        setReferralCode(data?.referral_code || null);
+        setReferralCount(Number(data?.referral_count || 0));
+      })
+      .catch((err) => console.error("Failed to load referral data:", err));
+  }, [isOpen, userId]);
+
+  const handleCopy = async () => {
+    if (!referralCode) return;
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/?ref=${referralCode}`);
+      setRefCopyOk(true);
+      setTimeout(() => setRefCopyOk(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy referral link:", err);
+    }
+  };
+
+  if (!isOpen) return null;
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, backgroundColor: C.overlay, zIndex: 2000, display: "flex", alignItems: "flex-start", justifyContent: "flex-end", padding: "60px 24px 0", animation: "fadeIn 0.2s ease" }}>
+      <div style={{ backgroundColor: C.surface, border: `1px solid ${C.rule}`, boxShadow: "0 8px 30px rgba(0,0,0,0.12)", minWidth: 280, maxWidth: 360, padding: 20, animation: "fadeIn 0.15s ease" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>Invite a friend</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkMuted, fontSize: 16 }}>✕</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+          <input
+            readOnly
+            value={referralCode ? `${window.location.origin}/?ref=${referralCode}` : ""}
+            placeholder="Loading..."
+            style={{ width: "100%", padding: "8px 10px", fontFamily: F.mono, fontSize: 11, color: C.inkMuted, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none", boxSizing: "border-box" }}
+          />
+          <button
+            type="button"
+            onClick={handleCopy}
+            disabled={!referralCode}
+            style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, padding: "0 14px", color: referralCode ? C.ink : C.inkFaint, background: "none", border: `1px solid ${C.ink}`, cursor: referralCode ? "pointer" : "default", minWidth: 64 }}
+          >
+            {refCopyOk ? "Copied!" : "Copy"}
+          </button>
+        </div>
+        {referralCount > 0 && (
+          <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkFaint, marginTop: 10 }}>
+            {referralCount} {referralCount === 1 ? "friend joined" : "friends joined"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // PLATFORM HEADER
 // ============================================================
-function PlatformHeader({ user, C, onSettings, onProfile, onEditor, onAdmin, isAdmin, userId, onOpenArticle }) {
+function PlatformHeader({ user, C, onSettings, onProfile, onEditor, onAdmin, isAdmin, userId, onOpenArticle, onReferral }) {
   const [menu, setMenu] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -1306,7 +1370,7 @@ function PlatformHeader({ user, C, onSettings, onProfile, onEditor, onAdmin, isA
               )}
             </div>
           )}
-          {user.role === "reader" && !user.isTester && <button style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, backgroundColor: "transparent", border: `1px solid ${C.accent}`, padding: "5px 12px", cursor: "pointer" }}>Upgrade</button>}
+          {user.role === "writer" && !user.isTester && <button style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 500, color: C.accent, backgroundColor: "transparent", border: `1px solid ${C.accent}`, padding: "5px 12px", cursor: "pointer" }}>Upgrade</button>}
           <div style={{ position: "relative" }} ref={menuRef}>
             <button onClick={() => setMenu(!menu)} style={{ width: 30, height: 30, borderRadius: "50%", backgroundColor: user.avatarUrl ? "transparent" : C.accent, color: user.avatarUrl ? "transparent" : "#fff", border: "none", cursor: "pointer", fontFamily: F.sans, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
               {user.avatarUrl ? <img src={user.avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : user.avatar}
@@ -1316,6 +1380,7 @@ function PlatformHeader({ user, C, onSettings, onProfile, onEditor, onAdmin, isA
               {["My Profile", "Settings"].map((item, i) => (
                 <button key={i} onClick={() => { setMenu(false); if (item === "My Profile") onProfile?.(); if (item === "Settings") onSettings(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer" }}>{item}</button>
               ))}
+              <button onClick={() => { setMenu(false); onReferral?.(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.inkLight, cursor: "pointer" }}>Invite a friend</button>
               {isAdmin && (
                 <button onClick={() => { setMenu(false); if (onAdmin) onAdmin(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "none", border: "none", fontFamily: F.sans, fontSize: 12, color: C.accent, cursor: "pointer", fontWeight: 500 }}>
                   ✦ Admin
@@ -2595,7 +2660,7 @@ function ArchivesView({ C, userId, user, session, onSelectEdition, onSwitchToEdi
   const [viewMode, setViewMode] = useState("list");
   const [yearFilter, setYearFilter] = useState(null);
 
-  const isPublisher = hasAccess(user?.role || "reader", user?.isTester || false, "publisher");
+  const isPublisher = hasAccess(user?.role || "writer", user?.isTester || false, "publisher");
 
   useEffect(() => {
     if (!userId) return;
@@ -2939,13 +3004,13 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
   const [periodStats, setPeriodStats] = useState(null);
   const [askUsage, setAskUsage] = useState({ used: 0, limit: 0, allowed: true });
 
-  const isReader = userRole === "reader";
+  const isWriter = userRole === "writer";
   const currentPeriodLabel = REFLECTION_PERIODS.find((p) => p.key === period)?.label ?? "Week";
   const selectedPeriodLabel = selectedPeriod?.label ?? (periodOptions[0]?.label ?? "—");
 
   // When period type changes, fetch list of available periods and select the first (most recent)
   useEffect(() => {
-    if (!userId || isReader) {
+    if (!userId || isWriter) {
       setPeriodOptions([]);
       setSelectedPeriod(null);
       setPeriodsLoading(false);
@@ -2962,13 +3027,13 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
         setSelectedPeriod(null);
       })
       .finally(() => setPeriodsLoading(false));
-  }, [userId, period, isReader]);
+  }, [userId, period, isWriter]);
 
   // Load reflection for the selected period (or latest when selectedPeriod is set from options above)
   useEffect(() => {
-    if (!userId || isReader) {
+    if (!userId || isWriter) {
       setLoading(false);
-      setReflectionData(isReader ? SAMPLE_REFLECTION : null);
+      setReflectionData(isWriter ? SAMPLE_REFLECTION : null);
       return;
     }
     if (periodsLoading || (periodOptions.length === 0 && !selectedPeriod)) {
@@ -2984,12 +3049,12 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
       .then(setReflectionData)
       .catch(() => setReflectionData(null))
       .finally(() => setLoading(false));
-  }, [userId, period, isReader, periodsLoading, selectedPeriod?.period_start, periodOptions.length]);
+  }, [userId, period, isWriter, periodsLoading, selectedPeriod?.period_start, periodOptions.length]);
 
   useEffect(() => {
-    if (!userId || isReader) return;
+    if (!userId || isWriter) return;
     fetchAskEditorUsage().then(setAskUsage).catch(() => setAskUsage({ used: 0, limit: 0, allowed: false }));
-  }, [userId, isReader, askAnswer]);
+  }, [userId, isWriter, askAnswer]);
 
   const periodFrom = selectedPeriod?.period_start ?? null;
   const periodTo = selectedPeriod?.period_end ?? null;
@@ -3116,7 +3181,7 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
             dropRef={periodDropRef}
             trigger={currentPeriodLabel}
             open={periodDropOpen}
-            onToggle={() => { if (!isReader) setPeriodDropOpen((o) => !o); setPeriodRangeDropOpen(false); }}
+            onToggle={() => { if (!isWriter) setPeriodDropOpen((o) => !o); setPeriodRangeDropOpen(false); }}
             width={180}
             active
           >
@@ -3125,18 +3190,18 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
                 <button
                   key={p.key}
                   onClick={() => {
-                    if (!isReader) { setPeriod(p.key); setPeriodDropOpen(false); setAskAnswer(null); setAskQuery(""); }
+                    if (!isWriter) { setPeriod(p.key); setPeriodDropOpen(false); setAskAnswer(null); setAskQuery(""); }
                   }}
-                  disabled={isReader}
+                  disabled={isWriter}
                   style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
                     width: "100%", padding: "10px 16px",
-                    backgroundColor: "transparent", border: "none", cursor: isReader ? "default" : "pointer",
+                    backgroundColor: "transparent", border: "none", cursor: isWriter ? "default" : "pointer",
                     borderLeft: period === p.key ? `3px solid ${C.accent}` : "3px solid transparent",
                     transition: "background-color 0.1s",
-                    opacity: isReader ? 0.6 : 1,
+                    opacity: isWriter ? 0.6 : 1,
                   }}
-                  onMouseEnter={(e) => { if (!isReader) e.currentTarget.style.backgroundColor = C.sectionBg; }}
+                  onMouseEnter={(e) => { if (!isWriter) e.currentTarget.style.backgroundColor = C.sectionBg; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
                 >
                   <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: period === p.key ? 600 : 400, color: C.ink }}>{p.label}</span>
@@ -3150,7 +3215,7 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
               dropRef={periodRangeDropRef}
               trigger={<span style={{ fontFamily: F.mono, fontSize: 11 }}>{selectedPeriodLabel}</span>}
               open={periodRangeDropOpen}
-              onToggle={() => { if (!isReader) setPeriodRangeDropOpen((o) => !o); setPeriodDropOpen(false); }}
+              onToggle={() => { if (!isWriter) setPeriodRangeDropOpen((o) => !o); setPeriodDropOpen(false); }}
               width={220}
               active={selectedPeriod && periodOptions[0] && selectedPeriod.period_start !== periodOptions[0].period_start}
             >
@@ -3159,18 +3224,18 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
                   <button
                     key={opt.period_start}
                     onClick={() => {
-                      if (!isReader) { setSelectedPeriod(opt); setPeriodRangeDropOpen(false); }
+                      if (!isWriter) { setSelectedPeriod(opt); setPeriodRangeDropOpen(false); }
                     }}
-                    disabled={isReader}
+                    disabled={isWriter}
                     style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
                       width: "100%", padding: "10px 16px",
-                      backgroundColor: "transparent", border: "none", cursor: isReader ? "default" : "pointer",
+                      backgroundColor: "transparent", border: "none", cursor: isWriter ? "default" : "pointer",
                       borderLeft: selectedPeriod?.period_start === opt.period_start ? `3px solid ${C.accent}` : "3px solid transparent",
                       transition: "background-color 0.1s",
-                      opacity: isReader ? 0.6 : 1,
+                      opacity: isWriter ? 0.6 : 1,
                     }}
-                    onMouseEnter={(e) => { if (!isReader) e.currentTarget.style.backgroundColor = C.sectionBg; }}
+                    onMouseEnter={(e) => { if (!isWriter) e.currentTarget.style.backgroundColor = C.sectionBg; }}
                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
                   >
                     <span style={{ fontFamily: F.sans, fontSize: 13, fontWeight: selectedPeriod?.period_start === opt.period_start ? 600 : 400, color: C.ink }}>{opt.label}</span>
@@ -3182,8 +3247,8 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
         </div>
       </div>
 
-      {/* Reader overlay: blur + CTA */}
-      {isReader && (
+      {/* Writer overlay: blur + CTA */}
+      {isWriter && (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.6)", zIndex: 10, pointerEvents: "none" }}>
           <div style={{ textAlign: "center", padding: 24 }}>
             <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink, marginBottom: 8 }}>Unlock Reflections with Editor</div>
@@ -3193,7 +3258,7 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
       )}
 
       {/* ===== MAIN GRID: primary (wide) + sidebar (narrow) ===== */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 300px", gap: 0, paddingTop: 0, animation: "fadeInUp 0.5s ease 0.1s both", filter: isReader ? "blur(3px)" : "none", pointerEvents: isReader ? "none" : "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 300px", gap: 0, paddingTop: 0, animation: "fadeInUp 0.5s ease 0.1s both", filter: isWriter ? "blur(3px)" : "none", pointerEvents: isWriter ? "none" : "auto" }}>
 
         {/* ===== PRIMARY COLUMN ===== */}
         <div style={{ paddingRight: 28 }}>
@@ -3225,39 +3290,39 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
 
           <div style={{ height: 1, backgroundColor: C.rule, marginBottom: 24 }} />
 
-          {/* Ask Your Editor — limits by tier; Reader sees disabled CTA */}
+          {/* Ask Your Editor — limits by tier; Writer sees disabled CTA */}
           <div style={{ marginBottom: 40 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
               <span style={{ color: C.accent, fontSize: 14 }}>✦</span>
               <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>Ask Your Editor</span>
-              {!isReader && askUsage.limit >= 0 && (
+              {!isWriter && askUsage.limit >= 0 && (
                 <span style={{ fontFamily: F.mono, fontSize: 10, color: C.inkMuted, marginLeft: "auto" }}>{askUsage.used} of {askUsage.limit} this month</span>
               )}
             </div>
             <p style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 14, lineHeight: 1.5 }}>
-              {isReader ? "Ask anything about your writing — Editor feature." : "Ask anything about your writing, patterns, moods, or recurring themes. Your editor will search across all your entries."}
+              {isWriter ? "Ask anything about your writing — Editor feature." : "Ask anything about your writing, patterns, moods, or recurring themes. Your editor will search across all your entries."}
             </p>
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <input
                 value={askQuery}
-                onChange={(e) => !isReader && askUsage.allowed && setAskQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !isReader && askUsage.allowed && handleAsk()}
-                placeholder={isReader ? "Ask anything about your writing — Editor feature" : (!askUsage.allowed ? (userRole === "editor" ? "Upgrade to Publisher for more questions →" : "Limit reached for this month") : "e.g. When am I happiest? What do I write about Marina?")}
-                disabled={isReader || !askUsage.allowed}
+                onChange={(e) => !isWriter && askUsage.allowed && setAskQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !isWriter && askUsage.allowed && handleAsk()}
+                placeholder={isWriter ? "Ask anything about your writing — Editor feature" : (!askUsage.allowed ? (userRole === "editor" ? "Upgrade to Publisher for more questions →" : "Limit reached for this month") : "e.g. When am I happiest? What do I write about Marina?")}
+                disabled={isWriter || !askUsage.allowed}
                 style={{
                   flex: 1, fontFamily: F.body, fontSize: 14, color: C.ink,
-                  backgroundColor: (isReader || !askUsage.allowed) ? C.sectionBg : "transparent", border: `1px solid ${C.rule}`,
-                  padding: "10px 14px", outline: "none", opacity: (isReader || !askUsage.allowed) ? 0.8 : 1,
+                  backgroundColor: (isWriter || !askUsage.allowed) ? C.sectionBg : "transparent", border: `1px solid ${C.rule}`,
+                  padding: "10px 14px", outline: "none", opacity: (isWriter || !askUsage.allowed) ? 0.8 : 1,
                 }}
               />
               <button
                 onClick={handleAsk}
-                disabled={isReader || askLoading || !askQuery.trim() || !askUsage.allowed}
+                disabled={isWriter || askLoading || !askQuery.trim() || !askUsage.allowed}
                 style={{
                   fontFamily: F.sans, fontSize: 11, fontWeight: 500,
-                  color: (askQuery.trim() && askUsage.allowed && !isReader) ? C.bg : C.inkFaint,
-                  backgroundColor: (askQuery.trim() && askUsage.allowed && !isReader) ? C.ink : C.rule,
-                  border: "none", padding: "10px 20px", cursor: (askQuery.trim() && askUsage.allowed && !isReader) ? "pointer" : "default",
+                  color: (askQuery.trim() && askUsage.allowed && !isWriter) ? C.bg : C.inkFaint,
+                  backgroundColor: (askQuery.trim() && askUsage.allowed && !isWriter) ? C.ink : C.rule,
+                  border: "none", padding: "10px 20px", cursor: (askQuery.trim() && askUsage.allowed && !isWriter) ? "pointer" : "default",
                   display: "flex", alignItems: "center", gap: 6,
                 }}
               >
@@ -3269,7 +3334,7 @@ function ReflectionsView({ C, userId, userRole, isAdmin, session }) {
               </button>
             </div>
 
-            {!isReader && askUsage.allowed && (
+            {!isWriter && askUsage.allowed && (
               <>
             {!askAnswer && !askLoading && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -3736,11 +3801,15 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [testerFilter, setTesterFilter] = useState("all");
+  const [referredFilter, setReferredFilter] = useState("all");
   const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState("desc");
   const [showAddUser, setShowAddUser] = useState(false);
-  const [addForm, setAddForm] = useState({ name: "", email: "", role: "reader", is_tester: false });
+  const [addForm, setAddForm] = useState({ name: "", email: "", role: "writer", is_tester: false });
   const [adding, setAdding] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const perPage = 20;
 
   const loadUsers = useCallback(async () => {
@@ -3749,6 +3818,7 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
       const result = await adminApi(session, "list_users", {
         page, per_page: perPage, search: search || undefined,
         role_filter: roleFilter, tester_filter: testerFilter,
+        referred_filter: referredFilter,
         sort_by: sortBy, sort_dir: sortDir,
       });
       setUsers(result.users || []);
@@ -3758,7 +3828,7 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
     } finally {
       setLoading(false);
     }
-  }, [session, page, search, roleFilter, testerFilter, sortBy, sortDir]);
+  }, [session, page, search, roleFilter, testerFilter, referredFilter, sortBy, sortDir]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
@@ -3792,11 +3862,17 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
   const handleAddUser = async () => {
     setAdding(true);
     try {
-      await adminApi(session, "create_user", addForm);
+      const payload = {
+        name: (addForm.name || "").trim(),
+        email: (addForm.email || "").trim().toLowerCase(),
+        role: addForm.role,
+        is_tester: addForm.is_tester,
+      };
+      await adminApi(session, "create_user", payload);
       setSaveMsg("User created.");
       setTimeout(() => setSaveMsg(null), 3000);
       setShowAddUser(false);
-      setAddForm({ name: "", email: "", role: "reader", is_tester: false });
+      setAddForm({ name: "", email: "", role: "writer", is_tester: false });
       loadUsers();
     } catch (err) {
       console.error("Failed to create user:", err);
@@ -3804,6 +3880,35 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
       setTimeout(() => setSaveMsg(null), 4000);
     } finally {
       setAdding(false);
+    }
+  };
+
+  const openDeleteModal = (u) => {
+    setDeleteTarget({ id: u.id, name: u.name, email: u.email });
+    setDeleteConfirmEmail("");
+    setSaveMsg(null);
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteTarget(null);
+    setDeleteConfirmEmail("");
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteTarget || deleteConfirmEmail.trim() !== deleteTarget.email) return;
+    setDeleting(true);
+    setSaveMsg(null);
+    try {
+      await adminApi(session, "delete_user", { user_id: deleteTarget.id, confirm_email: deleteConfirmEmail.trim() });
+      setSaveMsg("User deleted.");
+      setTimeout(() => setSaveMsg(null), 3000);
+      closeDeleteModal();
+      loadUsers();
+    } catch (err) {
+      setSaveMsg("Error: " + (err.message || "Failed to delete"));
+      setTimeout(() => setSaveMsg(null), 4000);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -3816,7 +3921,7 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
   const selectStyle = { ...inputStyle, cursor: "pointer" };
 
   const RoleBadge = ({ role, isTester }) => {
-    const s = ROLE_BADGE_STYLES[role] || ROLE_BADGE_STYLES.reader;
+    const s = ROLE_BADGE_STYLES[role] || ROLE_BADGE_STYLES.writer;
     return (
       <span style={{
         display: "inline-block", padding: "2px 8px", fontFamily: F.sans, fontSize: 10,
@@ -3849,13 +3954,17 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
         <select value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }} style={selectStyle}>
           <option value="all">All Roles</option>
           <option value="admin">Admin</option>
-          <option value="reader">Reader</option>
+          <option value="writer">Writer</option>
           <option value="editor">Editor</option>
           <option value="publisher">Publisher</option>
         </select>
         <select value={testerFilter} onChange={(e) => { setTesterFilter(e.target.value); setPage(1); }} style={selectStyle}>
           <option value="all">All Users</option>
           <option value="testers">Testers Only</option>
+        </select>
+        <select value={referredFilter} onChange={(e) => { setReferredFilter(e.target.value); setPage(1); }} style={selectStyle}>
+          <option value="all">All Referrals</option>
+          <option value="referred_only">Referred Only</option>
         </select>
         <button onClick={() => setShowAddUser(true)} style={{
           fontFamily: F.sans, fontSize: 11, fontWeight: 600,
@@ -3875,7 +3984,7 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
             <input placeholder="Name" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} style={inputStyle} />
             <input placeholder="Email" type="email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} style={inputStyle} />
             <select value={addForm.role} onChange={(e) => setAddForm({ ...addForm, role: e.target.value })} style={selectStyle}>
-              <option value="reader">Reader</option>
+              <option value="writer">Writer</option>
               <option value="editor">Editor</option>
               <option value="publisher">Publisher</option>
               <option value="admin">Admin</option>
@@ -3901,6 +4010,47 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
         </div>
       )}
 
+      {/* Delete User Modal */}
+      {deleteTarget && (
+        <div style={{
+          border: `1px solid ${C.accent}`, padding: 20, marginBottom: 20,
+          backgroundColor: C.sectionBg,
+        }}>
+          <div style={{ fontFamily: F.sans, fontSize: 13, fontWeight: 600, color: C.ink, marginBottom: 8 }}>
+            Delete user {deleteTarget.name}?
+          </div>
+          <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkMuted, marginBottom: 12 }}>
+            This cannot be undone. Type the user&apos;s email to confirm:
+          </p>
+          <input
+            type="email"
+            placeholder="email@example.com"
+            value={deleteConfirmEmail}
+            onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+            style={{ ...inputStyle, width: "100%", maxWidth: 320, marginBottom: 12 }}
+            autoFocus
+            aria-label="Confirm email"
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={handleDeleteUser}
+              disabled={deleting || deleteConfirmEmail.trim() !== deleteTarget.email}
+              style={{
+                fontFamily: F.sans, fontSize: 11, fontWeight: 500,
+                color: C.bg, backgroundColor: "#c41e1e", border: "none",
+                padding: "6px 16px", cursor: deleting || deleteConfirmEmail.trim() !== deleteTarget.email ? "default" : "pointer",
+                opacity: deleting || deleteConfirmEmail.trim() !== deleteTarget.email ? 0.7 : 1,
+              }}
+            >{deleting ? "Deleting..." : "Delete user"}</button>
+            <button onClick={closeDeleteModal} disabled={deleting} style={{
+              fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+              background: "none", border: `1px solid ${C.rule}`,
+              padding: "6px 16px", cursor: deleting ? "default" : "pointer",
+            }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* Users Table */}
       {loading ? <LoadingBlock C={C} text="Loading users..." /> : (
         <>
@@ -3911,10 +4061,12 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
                   {[
                     { key: "name", label: "Name" },
                     { key: "email", label: "Email" },
+                    { key: null, label: "Referred by" },
                     { key: "role", label: "Role" },
                     { key: null, label: "Tester" },
                     { key: null, label: "Entries" },
                     { key: "created_at", label: "Joined" },
+                    { key: null, label: "Actions" },
                   ].map((col) => (
                     <th key={col.label} onClick={col.key ? () => {
                       if (sortBy === col.key) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -3936,13 +4088,16 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
                   <tr key={u.id} style={{ borderBottom: `1px solid ${C.rule}` }}>
                     <td style={{ padding: "10px 10px", color: C.ink, fontWeight: 500 }}>{u.name}</td>
                     <td style={{ padding: "10px 10px", color: C.inkLight, fontSize: 11 }}>{u.email}</td>
+                    <td style={{ padding: "10px 10px", color: C.inkMuted, fontSize: 11 }}>
+                      {u.referred_by_name || "—"}
+                    </td>
                     <td style={{ padding: "10px 10px" }}>
                       <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)} style={{
                         fontFamily: F.sans, fontSize: 11, padding: "3px 6px",
                         color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`,
                         cursor: "pointer", outline: "none",
                       }}>
-                        <option value="reader">Reader</option>
+                        <option value="writer">Writer</option>
                         <option value="editor">Editor</option>
                         <option value="publisher">Publisher</option>
                         <option value="admin">Admin</option>
@@ -3966,10 +4121,23 @@ function AdminUsersTab({ C, session, setSaveMsg }) {
                     <td style={{ padding: "10px 10px", color: C.inkMuted, fontSize: 11, whiteSpace: "nowrap" }}>
                       {new Date(u.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                     </td>
+                    <td style={{ padding: "10px 10px" }}>
+                      {u.id !== session?.user?.id && (
+                        <button
+                          type="button"
+                          onClick={() => openDeleteModal(u)}
+                          style={{
+                            fontFamily: F.sans, fontSize: 11, color: C.inkMuted,
+                            background: "none", border: "none", cursor: "pointer",
+                            padding: "2px 0", textDecoration: "underline",
+                          }}
+                        >Delete</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {users.length === 0 && (
-                  <tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: C.inkMuted, fontStyle: "italic" }}>No users found.</td></tr>
+                  <tr><td colSpan={8} style={{ padding: 30, textAlign: "center", color: C.inkMuted, fontStyle: "italic" }}>No users found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -4129,6 +4297,22 @@ function AdminLimitsTab({ C, setSaveMsg }) {
   );
 }
 
+// Sample placeholder values for email template preview (Admin)
+function emailPreviewReplacements(templateId) {
+  const base = { letter_url: "https://thehauss.me/entry/sample-id", letter_written_date: "on February 14, 2025", title: "Your weekly reflection", excerpt: "This week you explored new ideas and took time to reflect. Here’s a short preview of your reflection text…", app_url: "https://thehauss.me" };
+  if (templateId === "letter_open") return { "{{letter_url}}": base.letter_url, "{{letter_written_date}}": base.letter_written_date };
+  if (templateId === "weekly_reflection") return { "{{title}}": base.title, "{{excerpt}}": base.excerpt, "{{app_url}}": base.app_url };
+  return {};
+}
+
+function applyEmailPreviewPlaceholders(html, templateId) {
+  if (!html || !templateId) return html || "";
+  const repl = emailPreviewReplacements(templateId);
+  let out = html;
+  for (const [key, value] of Object.entries(repl)) out = out.split(key).join(value);
+  return out;
+}
+
 // ── Admin: Email templates Tab (cron emails — letter_open, weekly_reflection) ──
 function AdminEmailTemplatesTab({ C, setSaveMsg }) {
   const [templates, setTemplates] = useState([]);
@@ -4184,44 +4368,59 @@ function AdminEmailTemplatesTab({ C, setSaveMsg }) {
       <p style={{ fontFamily: F.sans, fontSize: 12, color: C.inkMuted, marginBottom: 24 }}>
         HTML for cron-triggered emails. Use the placeholders listed below each template. Changes apply to the next send.
       </p>
-      {templates.map((t) => (
-        <div key={t.id} style={{ border: `1px solid ${editingId === t.id ? C.accent : C.rule}`, marginBottom: 24, transition: "border-color 0.2s" }}>
-          <div style={{ padding: "16px 20px", backgroundColor: editingId === t.id ? C.sectionBg : "transparent", borderBottom: `1px solid ${C.rule}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink }}>{t.name}</div>
-              <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkMuted, marginTop: 4 }}>{t.description}</div>
-              {t.placeholders_doc && (
-                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 8, whiteSpace: "pre-wrap" }}>{t.placeholders_doc}</div>
-              )}
+      {templates.map((t) => {
+        const htmlForPreview = editingId === t.id ? editHtml : (t.html_content || "");
+        const previewHtml = applyEmailPreviewPlaceholders(htmlForPreview, t.id);
+        return (
+          <div key={t.id} style={{ border: `1px solid ${editingId === t.id ? C.accent : C.rule}`, marginBottom: 24, transition: "border-color 0.2s" }}>
+            <div style={{ padding: "16px 20px", backgroundColor: editingId === t.id ? C.sectionBg : "transparent", borderBottom: `1px solid ${C.rule}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink }}>{t.name}</div>
+                <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkMuted, marginTop: 4 }}>{t.description}</div>
+                {t.placeholders_doc && (
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 8, whiteSpace: "pre-wrap" }}>{t.placeholders_doc}</div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {editingId !== t.id ? (
+                  <button onClick={() => startEdit(t)} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "5px 14px", cursor: "pointer" }}>Edit HTML</button>
+                ) : (
+                  <>
+                    <button onClick={handleSave} disabled={saving} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.accent, border: "none", padding: "5px 14px", cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>{saving ? "Saving…" : "Save"}</button>
+                    <button onClick={cancelEdit} style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, background: "none", border: `1px solid ${C.rule}`, padding: "5px 14px", cursor: "pointer" }}>Cancel</button>
+                  </>
+                )}
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {editingId !== t.id ? (
-                <button onClick={() => startEdit(t)} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.ink, border: "none", padding: "5px 14px", cursor: "pointer" }}>Edit HTML</button>
-              ) : (
-                <>
-                  <button onClick={handleSave} disabled={saving} style={{ fontFamily: F.sans, fontSize: 11, fontWeight: 500, color: C.bg, backgroundColor: C.accent, border: "none", padding: "5px 14px", cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>{saving ? "Saving…" : "Save"}</button>
-                  <button onClick={cancelEdit} style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, background: "none", border: `1px solid ${C.rule}`, padding: "5px 14px", cursor: "pointer" }}>Cancel</button>
-                </>
-              )}
+            {editingId === t.id && (
+              <div style={{ padding: 16 }}>
+                <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>HTML content</label>
+                <textarea
+                  value={editHtml}
+                  onChange={(e) => setEditHtml(e.target.value)}
+                  spellCheck={false}
+                  style={{
+                    width: "100%", minHeight: 320, padding: 12, fontFamily: F.mono, fontSize: 12, lineHeight: 1.5,
+                    color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
+                    resize: "vertical", boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            )}
+            <div style={{ padding: "0 16px 16px" }}>
+              <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>Preview</label>
+              <div style={{ border: `1px solid ${C.rule}`, backgroundColor: C.bg, overflow: "auto", maxHeight: 420 }}>
+                <iframe
+                  title={`Preview: ${t.name}`}
+                  sandbox="allow-same-origin"
+                  srcDoc={previewHtml || "<p style='padding:16px;color:#666'>No content yet.</p>"}
+                  style={{ width: "100%", minHeight: 360, border: "none", display: "block" }}
+                />
+              </div>
             </div>
           </div>
-          {editingId === t.id && (
-            <div style={{ padding: 16 }}>
-              <label style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>HTML content</label>
-              <textarea
-                value={editHtml}
-                onChange={(e) => setEditHtml(e.target.value)}
-                spellCheck={false}
-                style={{
-                  width: "100%", minHeight: 320, padding: 12, fontFamily: F.mono, fontSize: 12, lineHeight: 1.5,
-                  color: C.ink, backgroundColor: C.sectionBg, border: `1px solid ${C.rule}`, outline: "none",
-                  resize: "vertical", boxSizing: "border-box",
-                }}
-              />
-            </div>
-          )}
-        </div>
-      ))}
+        );
+      })}
       {templates.length === 0 && (
         <p style={{ fontFamily: F.sans, fontSize: 13, color: C.inkMuted, fontStyle: "italic" }}>No email templates found. Run migration 020_email_templates.sql.</p>
       )}
@@ -4233,16 +4432,6 @@ function AdminEmailTemplatesTab({ C, setSaveMsg }) {
 function AdminDashboardTab({ C, session }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [generateUserId, setGenerateUserId] = useState(session?.user?.id || "");
-  const [generateWeekStart, setGenerateWeekStart] = useState(() => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    d.setDate(d.getDate() + diff);
-    return d.toISOString().slice(0, 10);
-  });
-  const [generatingEdition, setGeneratingEdition] = useState(false);
-  const [generateMsg, setGenerateMsg] = useState(null);
 
   useEffect(() => {
     adminApi(session, "dashboard_stats")
@@ -4298,65 +4487,6 @@ function AdminDashboardTab({ C, session }) {
         Platform metrics at a glance.
       </p>
 
-      {/* Manual edition generation */}
-      <div style={{ border: `1px solid ${C.rule}`, backgroundColor: C.sectionBg, padding: "14px 16px", marginBottom: 20 }}>
-        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: C.inkMuted, marginBottom: 10 }}>
-          Edition Generator
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 160px auto", gap: 8, alignItems: "center" }}>
-          <input
-            value={generateUserId}
-            onChange={(e) => setGenerateUserId(e.target.value)}
-            placeholder="User ID (blank = all users if enabled server-side)"
-            style={{
-              padding: "8px 10px", fontFamily: F.mono, fontSize: 11, color: C.ink,
-              backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none",
-            }}
-          />
-          <input
-            type="date"
-            value={generateWeekStart}
-            onChange={(e) => setGenerateWeekStart(e.target.value)}
-            style={{
-              padding: "8px 10px", fontFamily: F.sans, fontSize: 11, color: C.ink,
-              backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none",
-            }}
-          />
-          <button
-            onClick={async () => {
-              setGeneratingEdition(true);
-              setGenerateMsg(null);
-              try {
-                const payload = {
-                  user_id: generateUserId.trim() || undefined,
-                  week_start: generateWeekStart || undefined,
-                };
-                await adminApi(session, "generate_edition", payload);
-                setGenerateMsg("Edition generation started/completed successfully.");
-              } catch (err) {
-                setGenerateMsg(`Error: ${err.message}`);
-              } finally {
-                setGeneratingEdition(false);
-              }
-            }}
-            disabled={generatingEdition}
-            style={{
-              padding: "8px 14px", fontFamily: F.sans, fontSize: 11, fontWeight: 600,
-              color: C.bg, backgroundColor: C.ink, border: "none",
-              cursor: generatingEdition ? "default" : "pointer",
-              opacity: generatingEdition ? 0.7 : 1,
-            }}
-          >
-            {generatingEdition ? "Generating..." : "Generate Edition"}
-          </button>
-        </div>
-        {generateMsg && (
-          <div style={{ marginTop: 8, fontFamily: F.sans, fontSize: 11, color: generateMsg.startsWith("Error:") ? "#c41e1e" : C.accent }}>
-            {generateMsg}
-          </div>
-        )}
-      </div>
-
       {/* Row 1: Big numbers */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
         <div style={statCardStyle}>
@@ -4377,6 +4507,16 @@ function AdminDashboardTab({ C, session }) {
         <div style={statCardStyle}>
           <div style={bigNum}>{stats.total_entries}</div>
           <div style={statLabel}>Total Entries</div>
+        </div>
+      </div>
+
+      <div style={{ border: `1px solid ${C.rule}`, backgroundColor: C.sectionBg, padding: "14px 16px", marginBottom: 20 }}>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 6 }}>
+          Referrals
+        </div>
+        <div style={{ fontFamily: F.sans, fontSize: 12, color: C.ink }}>
+          <strong>{stats.referrals_total_signups || 0}</strong> signups via referral ·{" "}
+          <strong>{stats.referrals_conversions || 0}</strong> converted
         </div>
       </div>
 
@@ -4402,7 +4542,7 @@ function AdminDashboardTab({ C, session }) {
                 <span style={{
                   display: "inline-block", padding: "1px 6px", fontFamily: F.sans, fontSize: 9,
                   fontWeight: 600, textTransform: "uppercase",
-                  ...(ROLE_BADGE_STYLES[w.role] || ROLE_BADGE_STYLES.reader),
+                  ...(ROLE_BADGE_STYLES[w.role] || ROLE_BADGE_STYLES.writer),
                 }}>{w.role}</span>
               </div>
               <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkMuted }}>{w.entries} entries</span>
@@ -4429,7 +4569,7 @@ function AdminDashboardTab({ C, session }) {
                 <span style={{
                   display: "inline-block", padding: "1px 6px", fontFamily: F.sans, fontSize: 9,
                   fontWeight: 600, textTransform: "uppercase",
-                  ...(ROLE_BADGE_STYLES[s.role] || ROLE_BADGE_STYLES.reader),
+                  ...(ROLE_BADGE_STYLES[s.role] || ROLE_BADGE_STYLES.writer),
                 }}>{s.role}</span>
                 <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, marginTop: 2 }}>
                   {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
@@ -5160,15 +5300,17 @@ function PublicEditionView() {
                     <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[0].section}</span>
                   </div>
                   <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 700, lineHeight: 1.15, color: C.ink, marginBottom: 10 }}>{editionData.topStories[0].headline}</h2>
-                  {editionData.topStories[0].subhead && (
+                  {editionData.topStories[0].subhead ? (
                     <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkLight, lineHeight: 1.5, marginBottom: 16 }}>{editionData.topStories[0].subhead}</p>
-                  )}
-                  <div style={{ backgroundColor: C.sectionBg, height: 200, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-                  </div>
-                  <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{editionData.topStories[0].excerpt?.slice(0, 200)}{editionData.topStories[0].excerpt?.length > 200 ? "..." : ""}</p>
+                  ) : null}
+                  {editionData.topStories[0].firstImageUrl ? (
+                    <div style={{ height: 200, marginBottom: 16, overflow: "hidden", backgroundColor: C.sectionBg }}>
+                      <img src={editionData.topStories[0].firstImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    </div>
+                  ) : null}
+                  <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{(() => { const t = stripHtml(editionData.topStories[0].excerpt || ""); return t.length > 200 ? t.slice(0, 200) + "..." : t; })()}</p>
                   <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
-                    <span>{editionData.topStories[0].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[0].date}</span>
+                    <span>{editionData.topStories[0].date}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[0].readTime}</span>
                   </div>
                 </article>
               )}
@@ -5182,12 +5324,17 @@ function PublicEditionView() {
                     <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[1].section}</span>
                   </div>
                   <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 600, lineHeight: 1.2, color: C.ink, marginBottom: 8 }}>{editionData.topStories[1].headline}</h3>
-                  {editionData.topStories[1].subhead && (
+                  {editionData.topStories[1].subhead ? (
                     <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkLight, marginBottom: 8 }}>{editionData.topStories[1].subhead}</p>
-                  )}
-                  <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 10 }}>{editionData.topStories[1].excerpt?.slice(0, 150)}{editionData.topStories[1].excerpt?.length > 150 ? "..." : ""}</p>
+                  ) : null}
+                  {editionData.topStories[1].firstImageUrl ? (
+                    <div style={{ height: 200, marginBottom: 10, overflow: "hidden", backgroundColor: C.sectionBg }}>
+                      <img src={editionData.topStories[1].firstImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    </div>
+                  ) : null}
+                  <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 10 }}>{(() => { const t = stripHtml(editionData.topStories[1].excerpt || ""); return t.length > 200 ? t.slice(0, 200) + "..." : t; })()}</p>
                   <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
-                    <span>{editionData.topStories[1].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[1].date}</span>
+                    <span>{editionData.topStories[1].date}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[1].readTime}</span>
                   </div>
                 </article>
               </>)}
@@ -5213,7 +5360,7 @@ function PublicEditionView() {
                 <div style={{ backgroundColor: C.sectionBg, padding: 20, marginBottom: 24 }}>
                   <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
                   <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>{editionData.editorial.headline}</h3>
-                  <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{editionData.editorial.content}</p>
+                  <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{stripHtml(editionData.editorial.content || "")}</p>
                   <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>
                     — {editionData.edition?.is_custom && editionData.author?.name ? editionData.author.name : "The Hauss Editor"}
                   </div>
@@ -5240,7 +5387,7 @@ function PublicEditionView() {
               <div style={{ backgroundColor: C.sectionBg, padding: 24, maxWidth: 600, margin: "0 auto", marginBottom: 24 }}>
                 <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
                 <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>The Editor's Note</h3>
-                <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{editionData.editorial.content}</p>
+                <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{stripHtml(editionData.editorial.content || "")}</p>
                 <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>
                   — {editionData.edition?.is_custom && editionData.author?.name ? editionData.author.name : "The Hauss Editor"}
                 </div>
@@ -5277,12 +5424,11 @@ function PublicEditionView() {
           </div>
         )}
 
-        {/* Stats bar */}
+        {/* Stats bar — only this edition */}
         <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, marginBottom: 24 }}>
           {[
-            { n: editionData.stats?.totalEntries?.toLocaleString() || "0", l: "Total Entries" },
-            { n: editionData.stats?.thisEdition || "0", l: "This Edition" },
-            { n: editionData.stats?.wordsThisWeek?.toLocaleString() || "0", l: "Words" },
+            { n: editionData.stats?.thisEdition ?? editionData.edition?.entryCount ?? "0", l: "Entries" },
+            { n: (editionData.stats?.wordsThisWeek ?? 0).toLocaleString(), l: "Words" },
           ].map((s, i, a) => (
             <div key={i} style={{ display: "flex", alignItems: "center" }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 32px" }}>
@@ -5322,6 +5468,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [referralOpen, setReferralOpen] = useState(false);
   const [articleEntry, setArticleEntry] = useState(null);
   const [articleList, setArticleList] = useState([]);
   const [editingEntry, setEditingEntry] = useState(null);
@@ -5340,6 +5487,21 @@ export default function App() {
       setSession(session);
     });
     return () => subscription.unsubscribe();
+  }, []);
+
+  // Capture referral code from URL for future signup.
+  useEffect(() => {
+    try {
+      let ref = new URLSearchParams(window.location.search).get("ref");
+      if (!ref && window.location.hash.includes("?")) {
+        const hashQuery = window.location.hash.split("?")[1] || "";
+        ref = new URLSearchParams(hashQuery).get("ref");
+      }
+      const normalized = (ref || "").trim().toLowerCase();
+      if (normalized) localStorage.setItem("hauss_ref", normalized);
+    } catch (err) {
+      console.error("Failed to capture referral code:", err);
+    }
   }, []);
 
   const [editionData, setEditionData] = useState(null);
@@ -5401,7 +5563,7 @@ export default function App() {
   const user = {
     name: profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "User",
     email: profile?.email || authUser?.email || "",
-    role: profile?.role || "reader",
+    role: profile?.role || "writer",
     isTester: profile?.is_tester || false,
     avatar: (profile?.name || authUser?.user_metadata?.name || authUser?.email?.split("@")[0] || "U")[0].toUpperCase(),
     avatarUrl: profile?.avatar_url || null,
@@ -5453,7 +5615,7 @@ export default function App() {
     }
   }, [editionData]);
 
-  const canAccessArchives = hasAccess(profile?.role || "reader", profile?.is_tester || false, "editor");
+  const canAccessArchives = hasAccess(profile?.role || "writer", profile?.is_tester || false, "editor");
 
   // Fetch profile after auth
   useEffect(() => {
@@ -5549,7 +5711,7 @@ export default function App() {
         ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: ${C.rule}; border-radius: 3px; }
       `}</style>
 
-      <PlatformHeader user={user} C={C} userId={userId} onSettings={() => setSettingsOpen(true)} onProfile={() => setProfileOpen(true)} onEditor={() => setEditorOpen(true)} onAdmin={() => setAdminOpen(true)} isAdmin={user.role === "admin"} onOpenArticle={openArticle} />
+      <PlatformHeader user={user} C={C} userId={userId} onSettings={() => setSettingsOpen(true)} onProfile={() => setProfileOpen(true)} onEditor={() => setEditorOpen(true)} onAdmin={() => setAdminOpen(true)} isAdmin={user.role === "admin"} onOpenArticle={openArticle} onReferral={() => setReferralOpen(true)} />
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 24px" }}>
 
@@ -5689,13 +5851,17 @@ export default function App() {
                 {null}
               </div>
               <h2 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 700, lineHeight: 1.15, color: C.ink, marginBottom: 10 }}>{editionData.topStories[0].headline}</h2>
-              <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkLight, lineHeight: 1.5, marginBottom: 16 }}>{editionData.topStories[0].subhead}</p>
-              <div style={{ backgroundColor: C.sectionBg, height: 200, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.rule} strokeWidth="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-              </div>
-              <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{editionData.topStories[0].excerpt}</p>
+              {editionData.topStories[0].subhead ? (
+                <p style={{ fontFamily: F.body, fontSize: 15, fontStyle: "italic", color: C.inkLight, lineHeight: 1.5, marginBottom: 16 }}>{editionData.topStories[0].subhead}</p>
+              ) : null}
+              {editionData.topStories[0].firstImageUrl ? (
+                <div style={{ height: 200, marginBottom: 16, overflow: "hidden", backgroundColor: C.sectionBg }}>
+                  <img src={editionData.topStories[0].firstImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+              ) : null}
+              <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{stripHtml(editionData.topStories[0].excerpt || "")}</p>
               <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
-                <span>{editionData.topStories[0].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[0].date}</span><span style={{ color: C.rule }}>·</span><span style={{ fontStyle: "italic", color: C.inkFaint }}>via {editionData.topStories[0].source === "telegram" ? "Telegram" : "App"}</span>
+                <span>{editionData.topStories[0].date}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[0].readTime}</span>
               </div>
             </article>}
             {editionData.topStories[1] && <><div style={{ height: 1, backgroundColor: C.rule, margin: "24px 0" }} />
@@ -5705,10 +5871,17 @@ export default function App() {
                 {editionData.topStories[1].isPublic ? <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2c-4 4.5-4 13.5 0 20"/><path d="M12 2c4 4.5 4 13.5 0 20"/><path d="M2 12h20"/><path d="M4 7h16"/><path d="M4 17h16"/></svg> Public</span> : <span style={{ fontFamily: F.sans, fontSize: 9, color: C.inkFaint, display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> Private</span>}
               </div>
               <h3 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 600, lineHeight: 1.2, color: C.ink, marginBottom: 8 }}>{editionData.topStories[1].headline}</h3>
-              <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkLight, marginBottom: 8 }}>{editionData.topStories[1].subhead}</p>
-              <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 10 }}>{editionData.topStories[1].excerpt}</p>
+              {editionData.topStories[1].subhead ? (
+                <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkLight, marginBottom: 8 }}>{editionData.topStories[1].subhead}</p>
+              ) : null}
+              {editionData.topStories[1].firstImageUrl ? (
+                <div style={{ height: 200, marginBottom: 10, overflow: "hidden", backgroundColor: C.sectionBg }}>
+                  <img src={editionData.topStories[1].firstImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+              ) : null}
+              <p style={{ fontFamily: F.body, fontSize: 14, lineHeight: 1.65, color: C.inkLight, marginBottom: 10 }}>{(() => { const t = stripHtml(editionData.topStories[1].excerpt || ""); return t.length > 200 ? t.slice(0, 200) + "..." : t; })()}</p>
               <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
-                <span>{editionData.topStories[1].readTime}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[1].date}</span><span style={{ color: C.rule }}>·</span><span style={{ fontStyle: "italic", color: C.inkFaint }}>via {editionData.topStories[1].source === "telegram" ? "Telegram" : "App"}</span>
+                <span>{editionData.topStories[1].date}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[1].readTime}</span>
               </div>
             </article></>}
           </div>
@@ -5728,7 +5901,7 @@ export default function App() {
             <div style={{ backgroundColor: C.sectionBg, padding: 20, marginBottom: 24 }}>
               <div style={{ fontFamily: F.display, fontSize: 18, color: C.accent, marginBottom: 8 }}>✦</div>
               <h3 style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, fontStyle: "italic", color: C.ink, marginBottom: 10 }}>{editionData.editorial.headline}</h3>
-              <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{editionData.editorial.content}</p>
+              <p style={{ fontFamily: F.body, fontSize: 13, lineHeight: 1.65, color: C.inkLight, marginBottom: 12 }}>{stripHtml(editionData.editorial.content || "")}</p>
               <div style={{ fontFamily: F.body, fontSize: 12, fontStyle: "italic", color: C.inkMuted }}>
                 — {editionData.edition?.is_custom ? (user?.name || profile?.name || "Editor") : "The Hauss Editor"}
               </div>
@@ -5764,7 +5937,7 @@ export default function App() {
         </div>}
 
         <div style={{ display: "flex", justifyContent: "center", padding: "20px 0", borderTop: `2px solid ${C.ink}`, marginBottom: 24 }}>
-          {[{ n: editionData.stats.totalEntries.toLocaleString(), l: "Total Entries" }, { n: editionData.stats.thisEdition, l: "This Edition" }, { n: editionData.stats.editions, l: "Editions" }, { n: editionData.stats.wordsThisWeek.toLocaleString(), l: "Words This Week" }].map((s, i, a) => (
+          {[{ n: String(editionData.stats?.thisEdition ?? editionData.edition?.entryCount ?? 0), l: "Entries" }, { n: (editionData.stats?.wordsThisWeek ?? 0).toLocaleString(), l: "Words" }].map((s, i, a) => (
             <div key={i} style={{ display: "flex", alignItems: "center" }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 32px" }}>
                 <span style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink }}>{s.n}</span>
@@ -5809,6 +5982,7 @@ export default function App() {
       )}
       <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} C={C} mode={mode} setMode={setMode} accent={accent} setAccent={setAccent} userId={userId} profile={profile} session={session} />
       <ProfilePanel isOpen={profileOpen} onClose={() => setProfileOpen(false)} C={C} userId={userId} profile={profile} onSaved={() => fetchProfile(userId).then((p) => { setProfile(p); if (p?.city !== undefined) setCity(p.city || ""); if (p?.publication_name) setPubName(p.publication_name); if (p?.motto) setMotto(p.motto); })} uploadAttachment={uploadAttachment} />
+      <ReferralPanel isOpen={referralOpen} onClose={() => setReferralOpen(false)} C={C} userId={userId} />
       {adminOpen && <AdminPage C={C} onClose={() => setAdminOpen(false)} session={session} />}
       {articleEntry && !editingEntry && (
         <ArticleView

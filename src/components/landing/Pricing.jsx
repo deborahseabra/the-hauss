@@ -22,7 +22,7 @@ const READER_FEATURES = [
 ];
 
 const EDITOR_FEATURES = [
-  "Everything in Reader",
+  "Everything in Writer",
   "Unlimited Hauss Editor ✦",
   "3 editorial voices",
   "All 5 sections",
@@ -108,9 +108,9 @@ export default function Pricing() {
 
         {/* Cards */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }} className="landing-pricing-grid">
-          {/* READER */}
+          {/* WRITER */}
           <div style={{ border: `1px solid ${C.rule}`, padding: 32 }}>
-            <h3 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Reader</h3>
+            <h3 style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Writer</h3>
             <div style={{ fontFamily: F.body, fontSize: 13, fontStyle: "italic", color: C.inkMuted, marginBottom: 12 }}>Start the habit.</div>
             <div style={{ fontFamily: F.mono, fontSize: 36, fontWeight: 600, color: C.ink }}>$0</div>
             <div style={{ fontFamily: F.sans, fontSize: 12, color: C.inkFaint, marginBottom: 20 }}>forever</div>

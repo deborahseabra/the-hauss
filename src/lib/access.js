@@ -1,8 +1,8 @@
 // Role-based access control for The Hauss
-// Tiers: reader (free) < editor (paid) < publisher (premium) < admin
+// Tiers: writer (free) < editor (paid) < publisher (premium) < admin
 
 const TIER_LEVEL = {
-  reader: 0,
+  writer: 0,
   editor: 1,
   publisher: 2,
   admin: 3,
@@ -10,7 +10,7 @@ const TIER_LEVEL = {
 
 export function getEffectiveRole(role, isTester) {
   if (isTester) return "publisher";
-  return role || "reader";
+  return role || "writer";
 }
 
 export function hasAccess(role, isTester, requiredTier) {
@@ -20,14 +20,14 @@ export function hasAccess(role, isTester, requiredTier) {
 
 export const ROLE_LABELS = {
   admin: "Admin",
-  reader: "Reader",
+  writer: "Writer",
   editor: "Editor",
   publisher: "Publisher",
 };
 
 export const ROLE_BADGE_STYLES = {
   admin: { backgroundColor: "#121212", color: "#fff" },
-  reader: { backgroundColor: "transparent", border: "1px solid #e2e2e2", color: "#727272" },
+  writer: { backgroundColor: "transparent", border: "1px solid #e2e2e2", color: "#727272" },
   editor: { backgroundColor: "#c41e1e", color: "#fff" },
   publisher: { backgroundColor: "#b8860b", color: "#fff" },
 };

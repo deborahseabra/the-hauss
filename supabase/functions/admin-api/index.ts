@@ -65,6 +65,8 @@ Deno.serve(async (req: Request) => {
         return await toggleTester(supabase, params);
       case "create_user":
         return await createUser(supabase, params);
+      case "delete_user":
+        return await deleteUser(supabase, params, user.id);
       case "dashboard_stats":
         return await dashboardStats(supabase);
       case "generate_edition":
@@ -91,6 +93,7 @@ async function listUsers(
     search?: string;
     role_filter?: string;
     tester_filter?: string;
+    referred_filter?: string;
     sort_by?: string;
     sort_dir?: string;
   }
@@ -102,7 +105,7 @@ async function listUsers(
   // Get users with entry counts
   let query = supabase
     .from("profiles")
-    .select("id, name, email, role, is_tester, is_master, created_at", {
+    .select("id, name, email, role, is_tester, is_master, referred_by, created_at", {
       count: "exact",
     });
 
@@ -118,6 +121,9 @@ async function listUsers(
 
   if (params.tester_filter === "testers") {
     query = query.eq("is_tester", true);
+  }
+  if (params.referred_filter === "referred_only") {
+    query = query.not("referred_by", "is", null);
   }
 
   const sortBy = params.sort_by || "created_at";
@@ -135,6 +141,8 @@ async function listUsers(
   // Get entry counts for these users
   const userIds = (users || []).map((u) => u.id);
   let entryCounts: Record<string, number> = {};
+  const referredByIds = [...new Set((users || []).map((u) => u.referred_by).filter(Boolean))];
+  let referrerNames: Record<string, string> = {};
 
   if (userIds.length > 0) {
     const { data: counts } = await supabase.rpc("get_entry_counts_for_users", {
@@ -157,9 +165,20 @@ async function listUsers(
     }
   }
 
+  if (referredByIds.length > 0) {
+    const { data: referrers } = await supabase
+      .from("profiles")
+      .select("id, name")
+      .in("id", referredByIds as string[]);
+    for (const r of referrers || []) {
+      referrerNames[r.id] = r.name;
+    }
+  }
+
   const result = (users || []).map((u) => ({
     ...u,
     entry_count: entryCounts[u.id] || 0,
+    referred_by_name: u.referred_by ? (referrerNames[u.referred_by] || "—") : null,
   }));
 
   return jsonResponse({
@@ -180,7 +199,7 @@ async function updateRole(
     return jsonResponse({ error: "user_id and role are required" }, 400);
   }
 
-  const validRoles = ["admin", "reader", "editor", "publisher"];
+  const validRoles = ["admin", "writer", "editor", "publisher"];
   if (!validRoles.includes(params.role)) {
     return jsonResponse({ error: `Invalid role: ${params.role}` }, 400);
   }
@@ -227,6 +246,7 @@ async function toggleTester(
 }
 
 // ── create_user ─────────────────────────────────────────────
+// Uses inviteUserByEmail so the new user receives an invite email to set password and sign in.
 
 async function createUser(
   supabase: ReturnType<typeof createClient>,
@@ -237,29 +257,36 @@ async function createUser(
     is_tester?: boolean;
   }
 ) {
-  if (!params.name || !params.email) {
+  const name = typeof params.name === "string" ? params.name.trim() : "";
+  const email = typeof params.email === "string" ? params.email.trim().toLowerCase() : "";
+  if (!name || !email) {
     return jsonResponse({ error: "name and email are required" }, 400);
   }
-
-  // Create auth user with a random password; they'll set their own via email
-  const tempPassword = crypto.randomUUID() + "Aa1!";
-  const {
-    data: authData,
-    error: authError,
-  } = await supabase.auth.admin.createUser({
-    email: params.email,
-    password: tempPassword,
-    email_confirm: false,
-    user_metadata: { name: params.name },
-  });
-
-  if (authError) {
-    return jsonResponse({ error: authError.message }, 400);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return jsonResponse({ error: "Invalid email format" }, 400);
   }
 
-  // The trigger handle_new_user creates the profile automatically.
-  // Now update role/is_tester if specified.
-  const userId = authData.user.id;
+  const appUrl = Deno.env.get("APP_URL") || "https://thehauss.me";
+  const redirectTo = `${appUrl.replace(/\/$/, "")}/`;
+
+  const {
+    data: inviteData,
+    error: inviteError,
+  } = await supabase.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+    data: { name },
+  });
+
+  if (inviteError) {
+    return jsonResponse({ error: inviteError.message }, 400);
+  }
+
+  const userId = inviteData?.user?.id;
+  if (!userId) {
+    return jsonResponse({ error: "Invite sent but user id not returned" }, 500);
+  }
+
+  // The trigger handle_new_user creates the profile. Update role/is_tester if specified.
   const updates: Record<string, unknown> = {};
   if (params.role) updates.role = params.role;
   if (params.is_tester !== undefined) updates.is_tester = params.is_tester;
@@ -268,13 +295,46 @@ async function createUser(
     await supabase.from("profiles").update(updates).eq("id", userId);
   }
 
-  // Send password reset email so user can set their password
-  await supabase.auth.admin.generateLink({
-    type: "magiclink",
-    email: params.email,
-  });
-
   return jsonResponse({ success: true, user_id: userId });
+}
+
+// ── delete_user ─────────────────────────────────────────────
+// Requires confirm_email to match profile.email. Cannot delete own account.
+// Deleting from auth.users cascades to profiles and all related data.
+
+async function deleteUser(
+  supabase: ReturnType<typeof createClient>,
+  params: { user_id?: string; confirm_email?: string },
+  currentUserId: string
+) {
+  if (!params.user_id) {
+    return jsonResponse({ error: "user_id is required" }, 400);
+  }
+  if (params.user_id === currentUserId) {
+    return jsonResponse({ error: "Cannot delete your own account" }, 400);
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("id", params.user_id)
+    .single();
+
+  if (profileError || !profile) {
+    return jsonResponse({ error: "User not found" }, 404);
+  }
+
+  const confirmEmail = typeof params.confirm_email === "string" ? params.confirm_email.trim() : "";
+  if (confirmEmail !== profile.email) {
+    return jsonResponse({ error: "Email does not match" }, 400);
+  }
+
+  const { error: authError } = await supabase.auth.admin.deleteUser(params.user_id);
+  if (authError) {
+    return jsonResponse({ error: authError.message }, 400);
+  }
+
+  return jsonResponse({ success: true });
 }
 
 // ── dashboard_stats ─────────────────────────────────────────
@@ -366,7 +426,7 @@ async function dashboardStats(
     }
     topWriters = topWriterIds.map(([id, count]) => ({
       name: profileMap[id]?.name || "Unknown",
-      role: profileMap[id]?.role || "reader",
+      role: profileMap[id]?.role || "writer",
       entries: count,
     }));
   }
@@ -378,6 +438,15 @@ async function dashboardStats(
     .order("created_at", { ascending: false })
     .limit(10);
 
+  const { count: referralsTotalSignups } = await supabase
+    .from("referrals")
+    .select("id", { count: "exact", head: true });
+
+  const { count: referralsConversions } = await supabase
+    .from("referrals")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "converted");
+
   return jsonResponse({
     total_users: totalUsers,
     by_role: byRole,
@@ -388,6 +457,8 @@ async function dashboardStats(
     entries_by_day: entriesByDay,
     top_writers: topWriters,
     recent_signups: recentSignups || [],
+    referrals_total_signups: referralsTotalSignups || 0,
+    referrals_conversions: referralsConversions || 0,
   });
 }
 

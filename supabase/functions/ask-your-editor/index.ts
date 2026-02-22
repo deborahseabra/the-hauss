@@ -119,7 +119,7 @@ Deno.serve(async (req: Request) => {
       .eq("id", userId)
       .single();
 
-    const role = profile?.role ?? "reader";
+    const role = profile?.role ?? "writer";
 
     const { data: limitRow } = await supabase
       .from("usage_limits")
