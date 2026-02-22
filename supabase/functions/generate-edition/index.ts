@@ -190,19 +190,35 @@ async function generateForUser(
   const entryCount = entries.length;
   const wordCount = entries.reduce((s, e) => s + (e.word_count || 0), 0);
 
-  const { data: latestEdition } = await supabase
+  // Check if this edition already exists (preserve its number on re-generation)
+  const { data: existingEdition } = await supabase
     .from("editions")
-    .select("volume, number")
+    .select("id, volume, number")
     .eq("user_id", userId)
-    .order("week_start", { ascending: false })
-    .limit(1)
+    .eq("week_start", weekStart)
     .maybeSingle();
 
-  const nextVolume = latestEdition?.volume || 1;
-  const nextNumber = (latestEdition?.number || 0) + 1;
+  let nextVolume: number;
+  let nextNumber: number;
+
+  if (existingEdition) {
+    nextVolume = existingEdition.volume;
+    nextNumber = existingEdition.number;
+  } else {
+    const { data: latestEdition } = await supabase
+      .from("editions")
+      .select("volume, number")
+      .eq("user_id", userId)
+      .order("week_start", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    nextVolume = latestEdition?.volume || 1;
+    nextNumber = (latestEdition?.number || 0) + 1;
+  }
 
   let editorialBody =
     "A quiet week in the notebook. The stories are smaller, but the signal is clear: your attention is becoming more precise.";
+  let editionHeadline = "";
   let briefingObj: Record<string, string> = {};
   let featuredIds: string[] = entries.slice(0, 2).map((e) => e.id);
   let orderedIds: string[] = entries.map((e) => e.id);
@@ -229,6 +245,9 @@ async function generateForUser(
         })),
       });
       editorialBody = ai.editorial_body || editorialBody;
+      if (ai.edition_headline && typeof ai.edition_headline === "string") {
+        editionHeadline = ai.edition_headline.slice(0, 70);
+      }
       if (ai.briefing && typeof ai.briefing === "object") {
         briefingObj = ai.briefing;
       }
@@ -250,6 +269,9 @@ async function generateForUser(
   }
 
   const editorialEncrypted = await encryptText(editorialBody);
+  const headlineEncrypted = editionHeadline
+    ? await encryptText(editionHeadline)
+    : null;
   const briefingEncrypted = Object.keys(briefingObj).length > 0
     ? await encryptText(JSON.stringify(briefingObj))
     : null;
@@ -276,6 +298,7 @@ async function generateForUser(
       entry_count: entryCount,
       word_count: wordCount,
       editorial_encrypted: editorialEncrypted,
+      headline_encrypted: headlineEncrypted,
       briefing_encrypted: briefingEncrypted,
       publication_city: pubCity,
       publication_temperature: pubTemp,
@@ -299,19 +322,35 @@ async function generateForUser(
       .insert(rowsToInsert);
     if (insertErr) throw insertErr;
 
-    // Auto-set cover from first entry's photo attachment
-    const firstEntryId = orderedIds[0];
-    const { data: photoRow } = await supabase
-      .from("attachments")
-      .select("url")
-      .eq("entry_id", firstEntryId)
-      .eq("type", "photo")
-      .limit(1)
-      .maybeSingle();
-    if (photoRow?.url) {
+    // Auto-set cover: cascade through entries by display_order
+    let coverUrl: string | null = null;
+    for (const entryId of orderedIds) {
+      if (coverUrl) break;
+      const { data: photoRow } = await supabase
+        .from("attachments")
+        .select("url")
+        .eq("entry_id", entryId)
+        .eq("type", "photo")
+        .limit(1)
+        .maybeSingle();
+      if (photoRow?.url) {
+        coverUrl = photoRow.url;
+        break;
+      }
+      // Fallback: check inline <img> in entry body
+      const entry = entries.find((e) => e.id === entryId);
+      if (entry?.body) {
+        const imgMatch = entry.body.match(/<img[^>]+src=["']([^"']+)["']/i);
+        if (imgMatch) {
+          coverUrl = imgMatch[1];
+          break;
+        }
+      }
+    }
+    if (coverUrl) {
       await supabase
         .from("editions")
-        .update({ cover_image_url: photoRow.url })
+        .update({ cover_image_url: coverUrl })
         .eq("id", editionId);
     }
   }

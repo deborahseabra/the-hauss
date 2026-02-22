@@ -286,7 +286,7 @@ async function generateReflectionFromEntries(
     mood_data: moodData,
   };
 
-  const ai = await callOpenAI(openaiKey, { ...promptRow, system_prompt }, payload);
+  const ai = await callOpenAI(openaiKey, { ...promptRow, system_prompt: systemPrompt }, payload);
   const content = {
     reflection: ai.reflection ?? {},
     connections: Array.isArray(ai.connections) ? ai.connections : [],
@@ -342,7 +342,7 @@ async function generateReflectionFromSummaries(
   }
 
   const systemPrompt = String(promptRow.system_prompt || "").replace(/\{\{period_label\}\}/g, periodLabel);
-  const ai = await callOpenAI(openaiKey, { ...promptRow, system_prompt }, { summaries });
+  const ai = await callOpenAI(openaiKey, { ...promptRow, system_prompt: systemPrompt }, { summaries });
   const content = {
     reflection: ai.reflection ?? {},
     connections: Array.isArray(ai.connections) ? ai.connections : [],
@@ -485,6 +485,13 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
+        const contentTyped = content as {
+          reflection?: Record<string, unknown>;
+          connections?: unknown[];
+          themes?: unknown[];
+          mood?: Record<string, unknown>;
+        };
+
         const { error: upsertErr } = await supabase.from("reflections").upsert(
           {
             user_id: uid,
@@ -493,6 +500,11 @@ Deno.serve(async (req: Request) => {
             period_end: period_end,
             period_type: periodType,
             content_json: content,
+            connections: contentTyped.connections ?? [],
+            themes: contentTyped.themes ?? [],
+            mood_data: contentTyped.mood?.data ?? [],
+            stats: {},
+            questions: [],
             generated_at: new Date().toISOString(),
           },
           { onConflict: "user_id,period,period_start" },
@@ -504,9 +516,10 @@ Deno.serve(async (req: Request) => {
         if (periodType === "week") {
           await sendWeeklyReflectionEmail(uid, content, supabase);
         }
-      } catch (err) {
-        console.error(`generate-reflections ${periodType} for ${uid}:`, err);
-        results.push({ user_id: uid, ok: false, error: String(err) });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : JSON.stringify(err);
+        console.error(`generate-reflections ${periodType} for ${uid}:`, msg);
+        results.push({ user_id: uid, ok: false, error: msg });
       }
     }
   }

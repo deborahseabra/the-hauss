@@ -49,6 +49,7 @@ import {
   fetchEditionLinks,
   fetchCityWeather,
   fetchReferralMe,
+  generateEdition,
 } from "./lib/api";
 import { hasAccess, ROLE_LABELS, ROLE_BADGE_STYLES } from "./lib/access";
 import CityField from "./components/CityField";
@@ -4432,12 +4433,30 @@ function AdminEmailTemplatesTab({ C, setSaveMsg }) {
 function AdminDashboardTab({ C, session }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [genUsers, setGenUsers] = useState([]);
+  const [genUserId, setGenUserId] = useState("");
+  const [genWeekStart, setGenWeekStart] = useState(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  });
+  const [generating, setGenerating] = useState(false);
+  const [genResult, setGenResult] = useState(null);
 
   useEffect(() => {
     adminApi(session, "dashboard_stats")
       .then(setStats)
       .catch((err) => console.error("Failed to load dashboard:", err))
       .finally(() => setLoading(false));
+    adminApi(session, "list_users", { per_page: 200 })
+      .then((res) => {
+        const users = res.users || res.data || [];
+        setGenUsers(users);
+        if (users.length > 0) setGenUserId((prev) => prev || users[0].id);
+      })
+      .catch(() => {});
   }, [session]);
 
   if (loading) return <LoadingBlock C={C} text="Loading dashboard..." />;
@@ -4486,6 +4505,77 @@ function AdminDashboardTab({ C, session }) {
       <p style={{ fontFamily: F.body, fontSize: 14, fontStyle: "italic", color: C.inkMuted, marginBottom: 24 }}>
         Platform metrics at a glance.
       </p>
+
+      {/* Edition Generator */}
+      <div style={{ border: `1px solid ${C.rule}`, backgroundColor: C.sectionBg, padding: "16px 20px", marginBottom: 20 }}>
+        <div style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.inkMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 12 }}>Edition Generator</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 200px" }}>
+            <label style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "block", marginBottom: 4 }}>User</label>
+            <select
+              value={genUserId}
+              onChange={(e) => { setGenUserId(e.target.value); setGenResult(null); }}
+              style={{ width: "100%", padding: "8px 10px", fontFamily: `${F.mono}`, fontSize: 11, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }}
+            >
+              {genUsers.length === 0 && <option value="">Loading users...</option>}
+              {genUsers.map((u) => (
+                <option key={u.id} value={u.id}>{u.name || u.email} ({u.role})</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: "0 0 160px" }}>
+            <label style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "block", marginBottom: 4 }}>Week start</label>
+            <input
+              type="date"
+              value={genWeekStart}
+              onChange={(e) => { setGenWeekStart(e.target.value); setGenResult(null); }}
+              style={{ width: "100%", padding: "8px 10px", fontFamily: `${F.mono}`, fontSize: 11, color: C.ink, backgroundColor: C.bg, border: `1px solid ${C.rule}`, outline: "none" }}
+            />
+          </div>
+          <button
+            disabled={generating || !genUserId}
+            onClick={async () => {
+              setGenerating(true);
+              setGenResult(null);
+              try {
+                const res = await adminApi(session, "generate_edition", { user_id: genUserId, week_start: genWeekStart });
+                setGenResult({ ok: true, data: res.result || res });
+              } catch (err) {
+                setGenResult({ ok: false, error: err.message });
+              } finally {
+                setGenerating(false);
+              }
+            }}
+            style={{
+              padding: "8px 20px", fontFamily: F.sans, fontSize: 11, fontWeight: 600,
+              color: "#fff", backgroundColor: generating ? C.inkMuted : C.accent,
+              border: "none", cursor: generating ? "wait" : "pointer",
+              textTransform: "uppercase", letterSpacing: "0.5px",
+              opacity: (!genUserId || generating) ? 0.5 : 1,
+            }}
+          >
+            {generating ? "Generating..." : "Generate Edition"}
+          </button>
+        </div>
+        {genResult && (
+          <div style={{
+            marginTop: 12, padding: "10px 14px", fontFamily: F.mono, fontSize: 11, lineHeight: 1.6,
+            backgroundColor: genResult.ok ? "#f0fdf4" : "#fef2f2",
+            border: `1px solid ${genResult.ok ? "#bbf7d0" : "#fecaca"}`,
+            color: genResult.ok ? "#166534" : "#991b1b",
+          }}>
+            {genResult.ok ? (
+              <>
+                Edition generated — {genResult.data.entry_count} entries, {genResult.data.word_count} words
+                <br />
+                <span style={{ color: "#6b7280" }}>ID: {genResult.data.edition_id} · Week: {genResult.data.week_start} – {genResult.data.week_end}</span>
+              </>
+            ) : (
+              <>Error: {genResult.error}</>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Row 1: Big numbers */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
@@ -5288,9 +5378,9 @@ function PublicEditionView() {
 
         {/* Two-column layout — top stories + sidebar */}
         {(editionData.topStories?.length > 0 || editionData.editorial?.content) ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 340px", padding: "24px 0" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", alignItems: "start", padding: "24px 0" }}>
             {/* Left column: top stories */}
-            <div style={{ paddingRight: 28 }}>
+            <div style={{ paddingRight: 28, borderRight: `1px solid ${C.rule}` }}>
               {editionData.topStories[0] && (
                 <article
                   onClick={isCover ? undefined : () => { window.location.href = `/entry/${editionData.topStories[0].id}`; }}
@@ -5339,8 +5429,6 @@ function PublicEditionView() {
                 </article>
               </>)}
             </div>
-            {/* Divider */}
-            <div style={{ backgroundColor: C.rule }} />
             {/* Right column: sidebar */}
             <div style={{ paddingLeft: 28 }}>
               {editionData.briefing?.length > 0 && (
@@ -5842,8 +5930,8 @@ export default function App() {
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 340px", padding: "24px 0", animation: "fadeInUp 0.6s ease 0.2s both" }}>
-          <div style={{ paddingRight: 28 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", alignItems: "start", padding: "24px 0", animation: "fadeInUp 0.6s ease 0.2s both" }}>
+          <div style={{ paddingRight: 28, borderRight: `1px solid ${C.rule}` }}>
             {editionData.topStories[0] && <article onClick={() => openEditionArticle(editionData.topStories[0].id)} style={{ cursor: "pointer" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <span style={{ fontFamily: F.sans, fontSize: 10, fontWeight: 600, color: C.accent, textTransform: "uppercase", letterSpacing: "1.5px" }}>{editionData.topStories[0].section}</span>
@@ -5859,7 +5947,7 @@ export default function App() {
                   <img src={editionData.topStories[0].firstImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
               ) : null}
-              <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{stripHtml(editionData.topStories[0].excerpt || "")}</p>
+              <p style={{ fontFamily: F.body, fontSize: 15, lineHeight: 1.7, color: C.inkLight, marginBottom: 12 }}>{(() => { const t = stripHtml(editionData.topStories[0].excerpt || ""); return t.length > 200 ? t.slice(0, 200) + "..." : t; })()}</p>
               <div style={{ fontFamily: F.sans, fontSize: 11, color: C.inkMuted, display: "flex", gap: 6 }}>
                 <span>{editionData.topStories[0].date}</span><span style={{ color: C.rule }}>·</span><span>{editionData.topStories[0].readTime}</span>
               </div>
@@ -5885,7 +5973,6 @@ export default function App() {
               </div>
             </article></>}
           </div>
-          <div style={{ backgroundColor: C.rule }} />
           <div style={{ paddingLeft: 28 }}>
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, color: C.ink, marginBottom: 4 }}>The Week at a Glance</h3>

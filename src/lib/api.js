@@ -670,46 +670,55 @@ export async function fetchAllEditions(userId) {
 
   const results = await Promise.all(
     editions.map(async (ed) => {
-      const editorial = await decryptOptional(ed.editorial_encrypted);
-      const headline = editorial
-        ? editorial.split(".")[0].slice(0, 60)
-        : `Edition No. ${ed.number}`;
+      const [storedHeadline, editorial] = await Promise.all([
+        decryptOptional(ed.headline_encrypted),
+        decryptOptional(ed.editorial_encrypted),
+      ]);
+      const headline = storedHeadline
+        || (editorial ? editorial.split(".")[0].slice(0, 70) : `Edition No. ${ed.number}`);
       const edNote = editorial
         ? editorial.slice(0, 160) + (editorial.length > 160 ? "..." : "")
         : "";
 
-      const moods = ["⚡", "🌧", "🌤", "☀️", "🌙"];
-      const moodEmoji = moods[ed.number % moods.length];
-
-      // Publication date (short format)
       const publicationDate = formatPublicationDateShort(ed.created_at || ed.week_start);
 
-      // Cover image: use stored URL, else first photo from entries (by display_order)
+      // Cover image: stored URL, else cascade through entries (photo attachments then inline <img>)
       let coverImageUrl = ed.cover_image_url || null;
       if (!coverImageUrl) {
         const { data: eeList } = await supabase
           .from("edition_entries")
-          .select("entry_id, display_order")
+          .select("entry_id, display_order, entry:entries(body_encrypted)")
           .eq("edition_id", ed.id)
           .order("display_order", { ascending: true });
-        const entryOrder = (eeList || []).reduce((acc, ee) => {
-          acc[ee.entry_id] = ee.display_order;
-          return acc;
-        }, {});
-        const { data: photos } = await supabase
-          .from("attachments")
-          .select("entry_id, url")
-          .in("entry_id", Object.keys(entryOrder))
-          .eq("type", "photo");
-        if (photos && photos.length > 0) {
-          const sorted = [...photos].sort(
-            (a, b) => (entryOrder[a.entry_id] ?? 999) - (entryOrder[b.entry_id] ?? 999)
-          );
-          coverImageUrl = sorted[0].url;
+        if (eeList?.length) {
+          const entryIds = eeList.map((ee) => ee.entry_id);
+          const { data: photos } = await supabase
+            .from("attachments")
+            .select("entry_id, url")
+            .in("entry_id", entryIds)
+            .eq("type", "photo");
+          const photoMap = {};
+          for (const p of photos || []) {
+            if (!photoMap[p.entry_id]) photoMap[p.entry_id] = p.url;
+          }
+          for (const ee of eeList) {
+            if (coverImageUrl) break;
+            if (photoMap[ee.entry_id]) {
+              coverImageUrl = photoMap[ee.entry_id];
+              break;
+            }
+            // Fallback: inline <img> in body
+            if (ee.entry?.body_encrypted) {
+              const body = await decryptOptional(ee.entry.body_encrypted);
+              if (body) {
+                const imgMatch = body.match(/<img[^>]+src=["']([^"']+)["']/i);
+                if (imgMatch) { coverImageUrl = imgMatch[1]; break; }
+              }
+            }
+          }
         }
       }
 
-      // Top section from first entry (for list view)
       let topSection = "Dispatch";
       const { data: topEntry } = await supabase
         .from("edition_entries")
@@ -737,7 +746,6 @@ export async function fetchAllEditions(userId) {
         coverImageUrl,
         entries: ed.entry_count,
         words: ed.word_count,
-        mood: moodEmoji,
       };
     })
   );
@@ -1565,5 +1573,19 @@ export async function adminApi(session, action, params = {}) {
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || "Admin API error");
+  return json;
+}
+
+export async function generateEdition(session, userId, weekStart) {
+  const res = await fetch(`${supabaseUrl}/functions/v1/generate-edition`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ user_id: userId, week_start: weekStart }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Edition generation failed");
   return json;
 }
